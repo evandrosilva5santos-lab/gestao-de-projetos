@@ -1,0 +1,29 @@
+:root {
+  /* 8px system per brief */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  /* Radii — site: sharp 3px cards, 30px pill buttons */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+  --radius-pill: 30px;
+
+  /* Container widths */
+  --container-max: 1200px;
+  --container-narrow: 780px;
+
+  /* Grid */
+  --grid-desktop-cols: 12; /* @kind other */
+  --grid-tablet-cols: 8; /* @kind other */
+  --grid-mobile-cols: 4; /* @kind other */
+  --grid-gutter: 24px;
+}

@@ -1,0 +1,23 @@
+:root {
+  /* Display / heading scale — Poppins, heavy (800-900), from live-site Elementor kit */
+  --text-display-xl: 900 4.375rem/1.2 var(--font-display);  /* 70px hero (site h1) */
+  --text-display-lg: 900 3.5rem/1.15 var(--font-display);   /* 56px */
+  --text-display-md: 900 2.8125rem/1.2 var(--font-display); /* 45px */
+  --text-display-sm: 600 2.1875rem/1.1 var(--font-display); /* 35px section titles (site h3) */
+
+  --text-heading-lg: 800 1.5625rem/1.1 var(--font-display); /* 25px — kit "primary" (uppercase on site) */
+  --text-heading-md: 700 1.375rem/1.1 var(--font-display);  /* 22px — kit "secondary" (uppercase on site) */
+  --text-heading-sm: 600 1.125rem/1.1 var(--font-display);  /* 18px — kit "text" */
+
+  /* Body — Rubik 15px/1.7 exactly as the site */
+  --text-body-lg: 400 1.0625rem/1.7 var(--font-body); /* 17px */
+  --text-body-md: 400 0.9375rem/1.7 var(--font-body); /* 15px — site default */
+  --text-body-sm: 400 0.8125rem/1.6 var(--font-body); /* 13px */
+  --text-caption: 500 0.75rem/1.4 var(--font-display); /* 12px */
+
+  --text-label: 600 0.8125rem/1.2 var(--font-display); /* 13px — site buttons */
+
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+}

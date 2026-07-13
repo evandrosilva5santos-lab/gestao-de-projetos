@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Geist', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: #4f46e5; text-decoration: none; }
+  a:hover { color: #4338ca; }
+  @keyframes om-pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+</style>
+</helmet>
+<div style="min-height:100vh; background:#fbfcfd; display:flex; color:#0f172a; font-family:'Geist',system-ui,sans-serif;">
+
+  <!-- Sidebar -->
+  <aside style="width:256px; background:#ffffff; border-right:1px solid #e2e8f0; display:flex; flex-direction:column; flex-shrink:0;">
+    <div style="height:64px; display:flex; align-items:center; padding:0 24px; border-bottom:1px solid #e2e8f0;">
+      <div style="display:flex; align-items:center; gap:8px; color:#4f46e5; font-weight:700; font-size:20px; letter-spacing:-0.02em;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#4f46e5" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+        Agency OS
+      </div>
+    </div>
+    <nav style="flex:1; padding:16px; display:flex; flex-direction:column; gap:4px;">
+      <button style="width:100%; height:32px; display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:0 10px; border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; cursor:pointer; background:#eef2ff; color:#4338ca;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+        Dashboard Motor
+      </button>
+      <button style="width:100%; height:32px; display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:0 10px; border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; cursor:pointer; background:transparent; color:#475569;" style-hover="background:#f1f5f9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        CRM &amp; Funil
+      </button>
+      <button style="width:100%; height:32px; display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:0 10px; border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; cursor:pointer; background:transparent; color:#475569;" style-hover="background:#f1f5f9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Clientes (Workspaces)
+      </button>
+      <button style="width:100%; height:32px; display:flex; align-items:center; justify-content:flex-start; gap:8px; padding:0 10px; border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; cursor:pointer; background:transparent; color:#475569;" style-hover="background:#f1f5f9;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        Regras de Roteamento
+      </button>
+    </nav>
+    <div style="padding:16px; border-top:1px solid #e2e8f0;">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:32px; height:32px; border-radius:9999px; background:#4f46e5; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px;">EA</div>
+        <div style="display:flex; flex-direction:column;">
+          <span style="font-size:14px; font-weight:600; color:#0f172a;">Admin</span>
+          <span style="font-size:12px; color:#64748b;">Agência Mega</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main style="flex:1; padding:32px; overflow-x:auto;">
+    <div style="max-width:1152px; margin:0 auto; display:flex; flex-direction:column; gap:32px;">
+
+      <!-- Header -->
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <div>
+          <h1 style="margin:0; font-size:30px; font-weight:700; letter-spacing:-0.025em; color:#0f172a;">Motor de Leads</h1>
+          <p style="margin:4px 0 0; color:#64748b; font-size:16px;">Visão global da distribuição em tempo real.</p>
+        </div>
+        <div style="display:flex; gap:12px;">
+          <button style="height:32px; display:inline-flex; align-items:center; gap:8px; padding:0 10px; border:1px solid #e2e8f0; background:#fff; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; color:#0f172a; cursor:pointer;" style-hover="background:#f1f5f9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            Configurar Regras
+          </button>
+          <button style="height:32px; display:inline-flex; align-items:center; gap:8px; padding:0 10px; border:none; background:#4f46e5; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; color:#fff; cursor:pointer;" style-hover="background:#4338ca;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>
+            Novo Lead Manual
+          </button>
+        </div>
+      </div>
+
+      <!-- Metrics -->
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:16px;">
+        <div style="display:flex; flex-direction:column; gap:16px; background:#fff; border-radius:14px; box-shadow:0 0 0 1px rgba(23,23,23,0.1); padding:16px 0; font-size:14px;">
+          <div style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:0 16px 8px;">
+            <div style="font-size:14px; font-weight:500; color:#475569;">Leads Recebidos (Hoje)</div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div style="padding:0 16px;">
+            <div style="font-size:24px; font-weight:700; color:#0f172a;">1,248</div>
+            <p style="margin:4px 0 0; font-size:12px; color:#059669; font-weight:500;">+12% vs ontem</p>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:16px; background:#fff; border-radius:14px; box-shadow:0 0 0 1px rgba(23,23,23,0.1); padding:16px 0; font-size:14px;">
+          <div style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:0 16px 8px;">
+            <div style="font-size:14px; font-weight:500; color:#475569;">Distribuídos</div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
+          </div>
+          <div style="padding:0 16px;">
+            <div style="font-size:24px; font-weight:700; color:#0f172a;">1,240</div>
+            <p style="margin:4px 0 0; font-size:12px; color:#64748b;">Via Round Robin</p>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:16px; background:#fff; border-radius:14px; box-shadow:0 0 0 1px rgba(23,23,23,0.1); padding:16px 0; font-size:14px;">
+          <div style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:0 16px 8px;">
+            <div style="font-size:14px; font-weight:500; color:#475569;">Em Processamento</div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+          </div>
+          <div style="padding:0 16px;">
+            <div style="font-size:24px; font-weight:700; color:#0f172a;">5</div>
+            <p style="margin:4px 0 0; font-size:12px; color:#64748b;">Fila do Inngest</p>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:16px; background:#fff; border-radius:14px; box-shadow:0 0 0 1px rgba(23,23,23,0.1); padding:16px 0; font-size:14px;">
+          <div style="display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:0 16px 8px;">
+            <div style="font-size:14px; font-weight:500; color:#475569;">Falhas / Erros</div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+          </div>
+          <div style="padding:0 16px;">
+            <div style="font-size:24px; font-weight:700; color:#0f172a;">3</div>
+            <p style="margin:4px 0 0; font-size:12px; color:#f43f5e;">Exigem ação</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table Card -->
+      <div style="display:flex; flex-direction:column; gap:16px; background:#fff; border-radius:14px; box-shadow:0 0 0 1px rgba(23,23,23,0.1); padding:16px 0; font-size:14px;">
+        <div style="display:grid; gap:4px; padding:0 16px;">
+          <div style="font-size:16px; font-weight:500; line-height:1.375; color:#0f172a;">Auditoria de Leads em Tempo Real</div>
+          <div style="font-size:14px; color:#64748b;">Acompanhe o percurso exato de cada lead desde o webhook até a distribuição pro vendedor.</div>
+        </div>
+        <div style="padding:0 16px;">
+          <div style="width:100%; overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:14px; caption-side:bottom;">
+              <thead>
+                <tr style="border-bottom:1px solid #e2e8f0;">
+                  <th style="height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-weight:500; color:#0f172a; white-space:nowrap;">Lead</th>
+                  <th style="height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-weight:500; color:#0f172a; white-space:nowrap;">Origem</th>
+                  <th style="height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-weight:500; color:#0f172a; white-space:nowrap;">Cliente (Workspace)</th>
+                  <th style="height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-weight:500; color:#0f172a; white-space:nowrap;">Status</th>
+                  <th style="height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-weight:500; color:#0f172a; white-space:nowrap;">Vendedor Designado</th>
+                  <th style="height:40px; padding:0 8px; text-align:right; vertical-align:middle; font-weight:500; color:#0f172a; white-space:nowrap;">Horário</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #e2e8f0;">
+                  <td style="padding:8px; vertical-align:middle; font-weight:500; white-space:nowrap;">
+                    <div>João Silva</div>
+                    <div style="font-size:12px; color:#64748b; font-weight:400;">(11) 99999-1111</div>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#2563eb; background:#eff6ff; border:1px solid #bfdbfe;">Meta Ads</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">Clinica Sorriso</td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#fff; background:#10b981;">Distribuído</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="width:24px; height:24px; border-radius:9999px; background:#e2e8f0; font-size:10px; display:flex; align-items:center; justify-content:center; font-weight:700;">MC</div>
+                      Marcos C.
+                    </div>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; text-align:right; font-size:14px; color:#64748b; white-space:nowrap;">Agora mesmo</td>
+                </tr>
+                <tr style="border-bottom:1px solid #e2e8f0;">
+                  <td style="padding:8px; vertical-align:middle; font-weight:500; white-space:nowrap;">
+                    <div>Maria Oliveira</div>
+                    <div style="font-size:12px; color:#64748b; font-weight:400;">maria@email.com</div>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#059669; background:#ecfdf5; border:1px solid #a7f3d0;">WhatsApp</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">Construtora XYZ</td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#fff; background:#10b981;">Distribuído</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="width:24px; height:24px; border-radius:9999px; background:#e2e8f0; font-size:10px; display:flex; align-items:center; justify-content:center; font-weight:700;">AL</div>
+                      Aline L.
+                    </div>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; text-align:right; font-size:14px; color:#64748b; white-space:nowrap;">Há 2 min</td>
+                </tr>
+                <tr style="border-bottom:1px solid #e2e8f0;">
+                  <td style="padding:8px; vertical-align:middle; font-weight:500; white-space:nowrap;">
+                    <div>Lead Inválido</div>
+                    <div style="font-size:12px; color:#f43f5e; font-weight:400;">Sem telefone/email</div>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#9333ea; background:#faf5ff; border:1px solid #e9d5ff;">Landing Page</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">Estética Bela</td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#dc2626; background:rgba(220,38,38,0.1);">Bloqueado</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="color:#94a3b8; font-style:italic; font-weight:400;">Deduplicado (Zod)</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; text-align:right; font-size:14px; color:#64748b; white-space:nowrap;">Há 15 min</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px; vertical-align:middle; font-weight:500; white-space:nowrap;">
+                    <div>Carlos Souza</div>
+                    <div style="font-size:12px; color:#64748b; font-weight:400;">(21) 98888-2222</div>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#ea580c; background:#fff7ed; border:1px solid #fed7aa;">Google Ads</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">Agência Própria</td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="display:inline-flex; align-items:center; height:20px; padding:2px 8px; border-radius:26px; font-size:12px; font-weight:500; color:#1d4ed8; background:#dbeafe; animation:om-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite;">Processando</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; white-space:nowrap;">
+                    <span style="color:#94a3b8; font-style:italic; font-weight:400;">Inngest executando...</span>
+                  </td>
+                  <td style="padding:8px; vertical-align:middle; text-align:right; font-size:14px; color:#64748b; white-space:nowrap;">Há 40 seg</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

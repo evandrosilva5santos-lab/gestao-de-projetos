@@ -1,15 +1,19 @@
 # 📋 PRD: Módulo de Distribuição de Leads (Lead Hub)
 
+> ⚠️ **Revisão estratégica (ver [ARQUITETURA-MOTOR-DE-LEADS.md](ARQUITETURA-MOTOR-DE-LEADS.md)):** este documento tratava Kommo/Planilha como "destinos" e Meta como origem única. O norte agora é o **Motor de Leads**: um único pipeline de 14 estágios, multi-origem (Meta + Google + futuras), com toda integração externa (Kommo, Sheets, WhatsApp **e** Meta/Google) implementada como Provider/Integration plugável — nenhuma delas contém regra de negócio. O CRM é um consumidor do Motor, não o produto. As seções abaixo continuam válidas como especificação do domínio "Leads" (banco, RLS, UI do dashboard), mas devem ser lidas em conjunto com o doc mestre. O primeiro módulo a implementar é [PRD-FONTES-DE-ENTRADA.md](PRD-FONTES-DE-ENTRADA.md).
+
 ## 1. Visão Geral
 **Status:** Aprovado
-**Objetivo Principal:** Receber leads do Meta Lead Ads **nativamente via webhook (tempo real)**, rastrear a origem (campanha/conjunto/anúncio), registrar tudo para controle interno do admin, distribuir ao "vendedor da vez" de forma **atômica**, entregar no destino de cada cliente (Kommo ou Planilha; futuramente o CRM próprio) e notificar via WhatsApp (Evolution API) — tudo em segundos.
+**Objetivo Principal:** Receber leads de múltiplas origens (Meta Lead Ads, Google Lead Forms, e futuras) **nativamente via webhook (tempo real)**, através de um **único pipeline central** (o Motor de Leads), rastrear a origem (campanha/conjunto/anúncio/formulário), registrar tudo para controle interno do admin, distribuir ao "vendedor da vez" de forma **atômica**, entregar nas integrações configuradas por formulário (Kommo, Planilha, WhatsApp — cada uma um consumidor plugável do Motor) — tudo em segundos, com idempotência garantida por `external_id`.
 
 **Problema que resolve:** hoje a Meta é conectada a uma planilha Google e workflows N8N fazem *polling* (delay de até ~20 min), com rodízio não-atômico (dois leads simultâneos podem cair no mesmo vendedor), lógica quadruplicada por cliente, IDs do Kommo hard-coded nos nós e falhas silenciosas. Volume: **1.000+ leads/dia** somando os clientes — a arquitetura atual não sustenta. Diagnóstico completo dos workflows N8N: [PLANO-EXECUCAO-MODULO-LEADS.md](PLANO-EXECUCAO-MODULO-LEADS.md).
 
-**Fluxo em uma linha:**
+**Fluxo em uma linha** *(versão completa de 14 estágios em [ARQUITETURA-MOTOR-DE-LEADS.md](ARQUITETURA-MOTOR-DE-LEADS.md)):*
 ```
-Meta (webhook leadgen) → TRACK → NORMALIZE → REGISTER (controle) → DEDUPE
-  → ASSIGN (rodízio atômico) → DELIVER (Kommo | Planilha) → NOTIFY (WhatsApp) → DONE
+Origem (Meta | Google) → Webhook → Ingest → Idempotência → Normalização
+  → Identificação (Workspace/Formulário) → Regras → Validação
+  → Rodízio atômico → Persistência → Integrações (Kommo | Sheet | WhatsApp)
+  → Logs → Finalização
 ```
 
 ## 2. Casos de Uso (User Stories)

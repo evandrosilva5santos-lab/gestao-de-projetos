@@ -191,42 +191,46 @@ app/api/oauth/meta/route.ts     # callback do Facebook Login for Business
 
 ## 5. Fases de execução
 
-### ✅ Fase 0 — Fundacão (já existe)
-Scaffold Next.js + Supabase criado. Confirmar auth + RLS base por `client_id`.
+> ⚠️ **Reordenado após revisão estratégica** (ver [ARQUITETURA-MOTOR-DE-LEADS.md](ARQUITETURA-MOTOR-DE-LEADS.md)): a prioridade deixou de ser "conectar a Meta primeiro" e passou a ser o **módulo Fontes de Entrada** (descoberta dinâmica de páginas/formulários via API oficial, multi-origem desde o início), com toda integração (Meta, Google, Kommo, Sheets, Evolution) implementada como Provider/Integration plugável.
 
-### Fase 1 — Banco e motor (o coração) — *começar aqui*
-- [ ] Migrations: `sellers`, `destinations`, `leads`, `lead_events`, `notification_configs`, `meta_connections`
-- [ ] Função `assign_next_seller()` + índices (`leads.leadgen_id unique`, `sellers(client_id, status, last_lead_at)`)
-- [ ] RLS: cliente só enxerga os dados do próprio `client_id`
-- [ ] `lib/leads/normalize.ts` portado do N8N + testes (telefone é o crítico)
-- [ ] `lib/leads/pipeline.ts` com retry (3 tentativas, backoff) e `lead_events`
+### ✅ Fase 0 — Fundação (já existe)
+Scaffold Next.js + Supabase criado (schema local, ainda sem projeto Supabase real conectado).
 
-### Fase 2 — Entrada Meta nativa
-- [ ] Criar App Meta (Business) + produto Webhooks/Lead Ads
-- [ ] `POST /api/webhooks/meta`: validar `X-Hub-Signature-256`, dedupe por `leadgen_id`, gravar e responder 200 em <2s
-- [ ] Buscar lead completo na Graph API (`/{leadgen_id}?fields=...`)
-- [ ] OAuth Facebook Login for Business → salvar `meta_connections` por cliente
-- [ ] Submeter App Review (`leads_retrieval` etc.) — **iniciar cedo, é o único prazo externo**
+### ✅ Fase 1 — Banco e motor (o coração) — **já implementado, corrigido**
+- [x] Migrations: `gestao_leads_sellers`, `gestao_leads_notification_configs`, `gestao_leads`, `gestao_leads_audit_logs`, `gestao_leads_distribution_rules`
+- [x] Função `assign_next_seller()` atômica (`FOR UPDATE SKIP LOCKED`) + índices
+- [x] RLS por `workspace_id` habilitado nas tabelas
+- [x] `lib/inngest/functions.ts` (`processNewLead`) — normalização de telefone/nome portada do N8N, dedupe, rodízio, persistência, notificação Evolution, auditoria
+- [ ] Reestruturar `processNewLead` para os 14 estágios do Motor (idempotência por `external_id`, identificação por formulário) — ver Fase 2
 
-### Fase 3 — Adapters de entrega
-- [ ] `kommo.ts`: config por cliente em `destinations.config` (nada hard-coded), fluxo busca-contato → cria-contato → cria-lead com `responsible_user_id` do vendedor da vez
-- [ ] `sheet.ts`: append na planilha CRM do cliente (mesmas colunas de hoje, transição suave)
+### Fase 2 — Fontes de Entrada (multi-origem) — **próxima, começar aqui**
+Ver [PRD-FONTES-DE-ENTRADA.md](PRD-FONTES-DE-ENTRADA.md) para o detalhamento completo.
+- [ ] Migrations: `gestao_leads_sources`, `gestao_leads_source_pages`, `gestao_leads_source_forms`, `gestao_leads_form_configs`, `gestao_leads_form_integrations`
+- [ ] `gestao_leads`: adicionar `external_id UNIQUE`, `source_type`, `source_form_id`, `custom_fields` (idempotência + modelo canônico)
+- [ ] Camada `lib/leads/providers/` — interface `LeadSourceProvider` (`validateCredentials`, `listPages`, `listForms`, `fetchLead`, `verifyWebhookSignature`)
+- [ ] `lib/leads/providers/meta/index.ts` — Graph API completo (System User Token recomendado; ver PRD)
+- [ ] `lib/leads/providers/google/index.ts` — mesma interface, placeholder inicial
+- [ ] `POST /api/webhooks/meta`: valida `X-Hub-Signature-256`, resolve `source_form_id` → `workspace_id`, dedupe por `external_id`, responde 200 em <2s
+- [ ] UI wizard (4 passos) em `features/lead-sources/`
+- [ ] Submeter App Review da Meta (`leads_retrieval` etc.) — **iniciar cedo, é o único prazo externo**
+
+### Fase 3 — Camada de Integrations (saída)
+- [ ] Interface `LeadIntegration` em `lib/leads/integrations/`
+- [ ] `kommo.ts`: config por formulário em `gestao_leads_form_integrations.config`, fluxo busca-contato → cria-contato → cria-lead com `responsible_user_id` do vendedor da vez
+- [ ] `sheet.ts`: append na planilha do cliente conforme config do formulário
+- [ ] `evolution.ts`: portar de `lib/inngest/functions.ts` para a camada de integrations (hoje está inline na função)
+- [ ] `webhook.ts` genérico (para integrações futuras sem código novo)
 - [ ] Retry + status `failed` com motivo visível
 
-### Fase 4 — Notificações
-- [ ] `evolution.ts` (instância `Evan_Suporte` já existente)
-- [ ] Templates por cliente (portar as mensagens atuais: "Chegou um *novo Lead* 🔥...")
-- [ ] Notificar vendedor (DM) + grupo, registrar em `lead_events`
-
-### Fase 5 — Painel na Gestão de Projetos
-- [ ] Aba "Leads" na página do cliente: `SellersTable` (toggle on/off), `LeadsLog` realtime, config de destino/notificação, `MetaConnectCard`
+### Fase 4 — Painel na Gestão de Projetos (ligar UI real)
+- [ ] `features/leads/components/*` (já existem como mock) → ligar com TanStack Query + Supabase Realtime
 - [ ] Ação "reprocessar lead" para os `failed`
 
-### Fase 6 — Portal do cliente (acesso restrito)
-- [ ] Login do cliente → enxerga SÓ o módulo de leads dele (RLS garante no banco)
+### Fase 5 — Portal do cliente (acesso restrito)
+- [ ] Login do cliente → enxerga SÓ o módulo de leads do próprio `workspace_id` (RLS garante no banco)
 - [ ] Ele mesmo liga/desliga vendedores e consulta telefones (autonomia que já tem hoje na planilha)
 
-### Fase 7 — Migração (sem big bang)
+### Fase 6 — Migração (sem big bang)
 1. **Shadow mode**: webhook Meta apontando para o app EM PARALELO com o N8N rodando. Comparar: todo lead do N8N apareceu no app? Vendedor da vez bateu?
 2. Importar vendedores das planilhas "Fila da Vez" (com `last_lead_at` atual, pra não bagunçar o rodízio)
 3. Piloto com 1 cliente (sugestão: Mega Invest — só planilha, sem Kommo, mais simples)
@@ -243,7 +247,8 @@ Scaffold Next.js + Supabase criado. Confirmar auth + RLS base por `client_id`.
 | WhatsApp | Evolution API (já instalada no servidor) |
 | Rodízio | Disponível + `last_lead_at` mais antigo, toggle on/off, atômico no banco |
 | ID do vendedor | `crm_user_id` = ID do usuário no Kommo (atribuição direta) |
-| Entrada de leads | Webhook nativo do App Meta próprio (sem planilha, sem polling) |
+| Entrada de leads | Multi-origem (Meta + Google, extensível) via camada de `LeadSourceProvider`s — webhook nativo, sem planilha, sem polling |
+| Integrações de saída | Kommo, Sheet, Evolution, Webhook genérico — via camada de `LeadIntegration`s, configuráveis por formulário, sem regra de negócio dentro delas |
 | Volume | 1.000+ leads/dia → fila em Postgres é suficiente, sem infra extra |
 | Quem configura | Você (admin geral) + cliente com acesso restrito ao módulo dele |
 | Planilha | Deixa de ser cérebro; vira apenas destino de entrega opcional |
@@ -255,8 +260,8 @@ Scaffold Next.js + Supabase criado. Confirmar auth + RLS base por `client_id`.
 | Risco | Mitigação |
 |---|---|
 | App Review da Meta demora | Submeter na Fase 2 desde o início; operar em modo dev/testers enquanto isso; fallback temporário: manter entrada atual só até aprovação |
-| Token de página expira | Usar long-lived token + job de renovação; alerta no painel se conexão cair |
+| Token expira | Preferir System User Access Token (não expira); se usar Long-Lived User Token, job de verificação periódica + alerta no painel (`gestao_leads_sources.status`) |
 | Kommo API rate limit | Retry com backoff (o N8N já sofria disso — os Waits de 1.2s nos nós Kommo) |
 | Evolution API fora do ar | Notificação falha NÃO bloqueia entrega do lead; retry separado |
-| Webhook duplicado da Meta | `leadgen_id UNIQUE` no banco (dedupe idempotente) |
+| Webhook duplicado (qualquer origem) | `gestao_leads.external_id UNIQUE` no banco (dedupe idempotente) |
 | Cliente mexe errado no painel | Portal restrito: só toggle de vendedor e visualização; configs de destino só admin |

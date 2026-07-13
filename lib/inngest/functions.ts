@@ -50,23 +50,37 @@ function abbreviateName(fullName: string): string {
 
 /**
  * Função assíncrona do Inngest responsável por processar o Lead.
- * Replica 100% a inteligência do fluxo N8N de deduplicação, normalização e Round Robin.
+ * Roteia o lead de forma isolada por Conexão (Cliente da Agência), garantindo rodada independente.
  */
 export const processNewLead = inngest.createFunction(
   { 
     id: "process-new-lead",
     name: "Processamento de Novo Lead",
     triggers: [{ event: "lead/received" }],
-    retries: 3 // 3 tentativas em caso de instabilidade nas APIs ou Banco
+    retries: 3 
   },
   async ({ event, step }) => {
     const { workspaceId, source, rawPayload } = event.data;
 
-    // 1. Padronização e Normalização dos Dados
+    // 1. Identificar Conexão e normalizar dados
     const treatedData = await step.run("normalize-lead-data", async () => {
       const rawName = rawPayload.name || rawPayload.nome || rawPayload.nome_completo || "Sem Nome";
       const rawPhone = rawPayload.phone || rawPayload.telefone || "";
       const rawEmail = rawPayload.email || rawPayload.e_mail || "";
+
+      // Tenta mapear o page_id vindo da Meta para descobrir a conexão
+      const pageId = rawPayload.page_id || (rawPayload.entry && rawPayload.entry[0]?.id) || null;
+      let connectionId = null;
+
+      if (pageId) {
+        const { data: conn } = await supabaseAdmin
+          .from("gestao_leads_meta_connections")
+          .select("id")
+          .eq("page_id", String(pageId))
+          .limit(1)
+          .maybeSingle();
+        connectionId = conn?.id || null;
+      }
 
       return {
         name: String(rawName).trim(),
@@ -79,19 +93,20 @@ export const processNewLead = inngest.createFunction(
         startTime: rawPayload.startTime || rawPayload["Quando Deseja iniciar?"] || "",
         utmMedium: rawPayload.utm_medium || "",
         utmContent: rawPayload.utm_content || "",
-        utmCampaign: rawPayload.utm_campaign || ""
+        utmCampaign: rawPayload.utm_campaign || "",
+        connectionId
       };
     });
 
-    // 2. Deduplicação (Procura se o Lead já existe no CRM desse workspace)
+    // 2. Deduplicação (Procura se o Lead já existe no CRM desse workspace/cliente)
     const existingAssignment = await step.run("check-duplicate-lead", async () => {
       if (!treatedData.email && !treatedData.phone) return null;
 
       let query = supabaseAdmin
         .from("gestao_leads")
-        .select("assigned_to")
+        .select("seller_id")
         .eq("workspace_id", workspaceId)
-        .not("assigned_to", "is", null);
+        .not("seller_id", "is", null);
 
       if (treatedData.email) {
         query = query.eq("email", treatedData.email);
@@ -102,39 +117,34 @@ export const processNewLead = inngest.createFunction(
       const { data } = await query.limit(1);
       
       if (data && data.length > 0) {
-        return data[0].assigned_to; // Retorna o ID do vendedor anterior
+        return data[0].seller_id; // Retorna o ID do vendedor anterior
       }
 
       return null;
     });
 
-    // 3. Distribuição Round Robin (caso seja lead novo)
-    const assignedUserId = await step.run("execute-distribution", async () => {
+    // 3. Distribuição Round Robin Atômica (caso seja lead novo, isolado por Conexão/Cliente)
+    const assignedSellerId = await step.run("execute-distribution", async () => {
       // Se a deduplicação achou um vendedor, mantém ele
       if (existingAssignment) return existingAssignment;
 
-      // Busca o próximo vendedor da fila (Round Robin ordenado pelo menor/mais antigo last_assigned_at)
-      const { data: sellers, error } = await supabaseAdmin
-        .from("core_workspace_users")
-        .select("id")
-        .eq("workspace_id", workspaceId)
-        .eq("role", "sales")
-        .eq("is_active", true)
-        .order("last_assigned_at", { ascending: true, nullsFirst: true })
-        .limit(1);
+      if (treatedData.connectionId) {
+        // Roteamento Atômico Isolado por Conexão (Cliente do Facebook)
+        const { data: seller, error } = await supabaseAdmin
+          .rpc("assign_next_seller_for_connection", { p_connection_id: treatedData.connectionId })
+          .maybeSingle();
 
-      if (error) throw new Error(`Erro ao buscar vendedor: ${error.message}`);
-      if (!sellers || sellers.length === 0) return null;
+        if (error) throw new Error(`Erro no roteamento atômico por conexão: ${error.message}`);
+        return (seller as any)?.id || null;
+      } else {
+        // Roteamento Atômico Global do Workspace (Fallback)
+        const { data: seller, error } = await supabaseAdmin
+          .rpc("assign_next_seller", { p_workspace_id: workspaceId })
+          .maybeSingle();
 
-      const nextSeller = sellers[0];
-
-      // Atualiza o timestamp de distribuição para passá-lo para o fim da fila
-      await supabaseAdmin
-        .from("core_workspace_users")
-        .update({ last_assigned_at: new Date().toISOString() })
-        .eq("id", nextSeller.id);
-
-      return nextSeller.id;
+        if (error) throw new Error(`Erro no roteamento atômico do workspace: ${error.message}`);
+        return (seller as any)?.id || null;
+      }
     });
 
     // 4. Salva o Lead no Banco de Dados
@@ -147,14 +157,14 @@ export const processNewLead = inngest.createFunction(
           email: treatedData.email,
           phone: treatedData.phone,
           source: source,
-          status: assignedUserId ? "distributed" : "error",
-          assigned_to: assignedUserId,
+          status: assignedSellerId ? "distributed" : "error",
+          seller_id: assignedSellerId,
           raw_data: {
             ...rawPayload,
             treated: treatedData
           }
         })
-        .select("id, name, status, assigned_to")
+        .select("id, name, status, seller_id")
         .single();
 
       if (error) throw new Error(`Erro ao salvar lead: ${error.message}`);
@@ -198,11 +208,11 @@ export const processNewLead = inngest.createFunction(
 
       // Busca dados do vendedor para personalizar e saber o telefone
       let sellerDetails = null;
-      if (assignedUserId) {
+      if (assignedSellerId) {
         const { data } = await supabaseAdmin
-          .from("core_workspace_users")
+          .from("gestao_leads_sellers")
           .select("name, phone")
-          .eq("id", assignedUserId)
+          .eq("id", assignedSellerId)
           .single();
         sellerDetails = data;
       }
@@ -231,9 +241,9 @@ export const processNewLead = inngest.createFunction(
         .from("gestao_leads_audit_logs")
         .insert({
           lead_id: leadRecord.id,
-          action: assignedUserId ? "round_robin_distribution" : "error",
+          action: assignedSellerId ? "round_robin_distribution" : "error",
           details: {
-            assigned_to: assignedUserId,
+            seller_id: assignedSellerId,
             existing_assignment: !!existingAssignment,
             treated_data: treatedData
           }
