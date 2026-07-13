@@ -52,3 +52,12 @@
   - `lib/inngest/client.ts`: Inicialização do cliente Inngest com Eventos Tipados.
   - `lib/inngest/functions.ts`: Definição das funções assíncronas (ex: `processNewLead`).
   - `app/api/inngest/route.ts`: Endpoint obrigatório que o painel do Inngest vai "escutar" para disparar os webhooks.
+
+### [2026-07-13] Implementação do Motor de Distribuição (Round Robin) & Integração N8N (WhatsApp)
+- **Ação:** Implementação no backend da inteligência de normalização de dados, deduplicação (re-roteamento) e Round Robin, baseada na análise 1-para-1 do workflow N8N Karol Shutz.
+- **Normalização de Dados:** Escrita de helper no backend para limpar números de telefone brasileiros, remover/adicionar o nono dígito (com base nos DDDs que exigem) e abreviação de nome de vendedor.
+- **Lógica Round Robin (Vendedor da Vez):** Implementada a distribuição stateless consultando `core_workspace_users` ordenados por `last_assigned_at` em ordem ascendente (o vendedor que não recebe leads há mais tempo é escolhido), e atualizando o carimbo de data/hora logo após a designação.
+- **WhatsApp Integrado (Evolution API):** Disparo nativo de requisições POST para a Evolution API em segundo plano. Suporta notificação direta para o telefone do vendedor designado e também para o grupo de WhatsApp cadastrado na configuração do Workspace.
+- **Nova Migration:** Criado o script `supabase/migrations/20260713000100_add_sales_and_whatsapp_fields.sql` para suportar o vendedor da vez (`last_assigned_at`, `name`, `phone`, `is_active`) e a configuração do WhatsApp (`whatsapp_config` JSONB).
+- **TypeScript & Build:** Correção de tipos da versão v4 do SDK do Inngest (`triggers` encapsulado no objeto de opções de `createFunction`), remoção do bloqueio de build quando variáveis de ambiente do Supabase estão vazias em tempo de build estático.
+
