@@ -1,0 +1,32 @@
+=======================================================================
+INSTRUÇÕES PARA O AGENTE DE IA E DESENVOLVEDORES (COMO USAR ESTA PASTA)
+=======================================================================
+
+Parabéns! Se você está lendo isso, você ativou o Cérebro Arquitetural do START-SYSTEM. 
+
+Esta pasta (`00 - Regras`) contém as diretrizes universais e "geniais" que devem ser aplicadas em *QUALQUER* novo aplicativo ou módulo desenvolvido a partir de agora. Este é um pacote de upgrade pronto para o sucesso.
+
+COMO INICIAR UMA NOVA FUNCIONALIDADE OU NOVO APLICATIVO:
+
+PASSO 1: ESTUDO OBRIGATÓRIO
+Antes de escrever a primeira linha de código, leia atentamente:
+- RULES.md (As regras de ouro)
+- ARCHITECTURE.md (Estrutura de Pastas e Data Fetching)
+- DESIGN.md (O guia visual e estético)
+- DATABASE-NAMING.md (Convenção obrigatória de nomes de tabela — projeto Supabase é compartilhado entre TODOS os apps)
+
+PASSO 2: CRIE O PRD
+Utilize o `PRD-TEMPLATE.md` para escrever o Product Requirements Document.
+Ele deve definir claramente o que será construído, quais tabelas no Supabase serão criadas/modificadas, e como a feature se encaixa na pasta `/features/`. Peça aprovação do usuário.
+
+PASSO 3: DESENVOLVA SEGUINDO A ARQUITETURA
+- Crie a pasta da funcionalidade em `/features/[nome-da-feature]`.
+- Crie o banco de dados e as políticas RLS no Supabase.
+- Construa a UI usando Tailwind e shadcn/ui.
+- Conecte ao backend usando Server Actions e TanStack Query.
+- Utilize o arquivo `FEATURE-README-TEMPLATE.md` (antigo Tutorial) para documentar a funcionalidade criada dentro da pasta dela.
+
+PASSO 4: VALIDAÇÃO
+Verifique se você cumpriu a regra máxima: O sistema não possui variáveis chumbadas (hardcoded)? Está integrado via AI SDK? O Dark mode funciona?
+
+Pronto. Seguindo estes passos, você criará sistemas de qualidade internacional, robustos e extremamente escaláveis.
