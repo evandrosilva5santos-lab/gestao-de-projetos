@@ -23,7 +23,7 @@ function relativeTime(iso: string | null): string {
   return `Há ${days} dia(s)`;
 }
 
-export function SellersQueueTab() {
+export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +71,11 @@ export function SellersQueueTab() {
     );
   }
 
+  const visibleGroups = workspaceId ? groups.filter((g) => g.workspaceId === workspaceId) : groups;
+
   return (
     <div className="flex flex-col gap-5">
-      {groups.map((group) => {
+      {visibleGroups.map((group) => {
         // Só entram no ranking de posição os vendedores ativos, ordenados por
         // last_assigned_at ASC NULLS FIRST — o mesmo critério do RPC assign_next_seller*.
         const activeSorted = [...group.sellers]
@@ -91,7 +93,7 @@ export function SellersQueueTab() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>{group.workspaceName} — Fila da Vez</CardTitle>
+                  <CardTitle>{workspaceId ? "Fila da Vez" : `${group.workspaceName} — Fila da Vez`}</CardTitle>
                   <CardDescription>
                     Ordem de recebimento de novos leads. Vendedores pausados são ignorados na rodada.
                   </CardDescription>
@@ -158,7 +160,7 @@ export function SellersQueueTab() {
         );
       })}
 
-      {!loading && groups.length === 0 && (
+      {!loading && visibleGroups.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center text-slate-400">Nenhum vendedor cadastrado ainda.</CardContent>
         </Card>

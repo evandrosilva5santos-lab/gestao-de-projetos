@@ -32,14 +32,20 @@ const MOCK_FORMS = ["Avaliação", "Consórcio", "Orçamento"];
 export function NewIntegrationModal({
   onClose,
   onCreate,
-  editingConnection
+  editingConnection,
+  defaultWorkspaceId,
+  defaultProviderId
 }: {
   onClose: () => void;
   onCreate: (connection: Connection) => void;
   editingConnection?: Connection | null;
+  /** Pré-seleciona o cliente (usado quando o modal é aberto de dentro do contexto de um cliente específico). */
+  defaultWorkspaceId?: string;
+  /** Pula a etapa "escolher provedor" quando o contexto já sabe qual é (ex.: aba Fontes de Entrada). */
+  defaultProviderId?: ProviderId;
 }) {
-  const [step, setStep] = useState<0 | 1 | 2>(0);
-  const [providerId, setProviderId] = useState<ProviderId | null>(null);
+  const [step, setStep] = useState<0 | 1 | 2>(defaultProviderId ? 1 : 0);
+  const [providerId, setProviderId] = useState<ProviderId | null>(defaultProviderId || null);
   const [selectedForms, setSelectedForms] = useState<Set<string>>(new Set(MOCK_FORMS.slice(0, 3)));
   const [isSaving, setIsSaving] = useState(false);
 
@@ -70,7 +76,7 @@ export function NewIntegrationModal({
   const [metaForms, setMetaForms] = useState<MetaLeadForm[]>([]);
   const [metaLoadingForms, setMetaLoadingForms] = useState(false);
   const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
-  const [metaWorkspaceId, setMetaWorkspaceId] = useState<string>("");
+  const [metaWorkspaceId, setMetaWorkspaceId] = useState<string>(defaultWorkspaceId || "");
   const [metaNewWorkspaceName, setMetaNewWorkspaceName] = useState("");
   const [metaSellers, setMetaSellers] = useState<{ name: string; phone: string }[]>([{ name: "", phone: "" }]);
 
@@ -162,7 +168,8 @@ export function NewIntegrationModal({
         subdomain: kommoSubdomain,
         token: kommoToken,
         pipelineId: kommoPipeline,
-        statusId: kommoStatus
+        statusId: kommoStatus,
+        workspaceId: defaultWorkspaceId
       });
       
       if (res.success) {
@@ -190,7 +197,8 @@ export function NewIntegrationModal({
         clientEmail: sheetsEmail,
         privateKey: sheetsKey,
         spreadsheetId: sheetsId,
-        sheetName: sheetsName
+        sheetName: sheetsName,
+        workspaceId: defaultWorkspaceId
       });
       
       if (res.success) {
@@ -214,7 +222,8 @@ export function NewIntegrationModal({
         url: evoUrl,
         token: evoToken,
         instanceName: evoInstance,
-        groupJid: evoGroup
+        groupJid: evoGroup,
+        workspaceId: defaultWorkspaceId
       });
       
       if (res.success) {

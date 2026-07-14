@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { agencyOsThemeVars } from "../lib/agency-os-theme";
 import {
-  LogoIcon, MotorIcon, FontesIcon, CentralIcon, DashboardIcon, CrmIcon,
-  ClientesIcon, GearIcon, VendedoresIcon, LogsIcon, LogoutIcon, MenuIcon,
+  LogoIcon, MotorIcon, CentralIcon, DashboardIcon,
+  ClientesIcon, GearIcon, LogsIcon, LogoutIcon, MenuIcon,
   SunIcon, MoonIcon, UserPlusIcon
 } from "./icons/agency-os-icons";
 import { OverviewTab } from "./OverviewTab";

@@ -25,12 +25,12 @@ function statusBadge(status: string) {
   return <Badge variant="outline">{status}</Badge>;
 }
 
-export function OverviewTab() {
+export function OverviewTab({ workspaceId }: { workspaceId?: string } = {}) {
   const [data, setData] = useState<OverviewData | null>(null);
 
   useEffect(() => {
-    getLeadsOverview().then(setData);
-  }, []);
+    getLeadsOverview(workspaceId).then(setData);
+  }, [workspaceId]);
 
   const metrics = data?.metrics;
   const leads = data?.recentLeads || [];
@@ -46,7 +46,7 @@ export function OverviewTab() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-slate-900">{metrics ? metrics.receivedToday : "—"}</div>
-            <p className="text-xs text-slate-500 mt-1">Todos os clientes</p>
+            <p className="text-xs text-slate-500 mt-1">{workspaceId ? "Este cliente" : "Todos os clientes"}</p>
           </CardContent>
         </Card>
         <Card>
