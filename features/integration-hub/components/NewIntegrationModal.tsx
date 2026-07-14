@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FacebookIcon } from "@/features/leads/components/FacebookIcon";
-import { SheetsFileIcon, XIcon, ChevronRightIcon, CheckIcon } from "@/features/leads/components/icons/agency-os-icons";
+import { XIcon, ChevronRightIcon, CheckIcon } from "@/features/leads/components/icons/agency-os-icons";
 import type { Connection } from "./ConnectionCard";
+import {
+  saveKommoDestination,
+  saveGoogleSheetsDestination,
+  saveEvolutionDestination,
+  listWorkspaces,
+  listMetaPages,
+  listMetaForms,
+  saveMetaConnection,
+  addSellerToConnection,
+} from "../actions";
+import type { MetaPage, MetaLeadForm } from "@/lib/leads/providers/meta";
 
 // Porte pixel-exato do modal "Nova integração" de Agency OS.dc.html
-// (linhas ~1395-1450). Fluxo real: clicar num provedor avança do passo 0
-// para o 1; "Entrar com OAuth" ou "Validar token" avança do 1 para o 2;
-// "Salvar integração" no passo 2 conclui. Não há botão genérico "Próximo".
 type ProviderId = "meta" | "google" | "sheets" | "kommo" | "evolution";
 
 const PROVIDERS: { id: ProviderId; label: string; iconBg: string; icon: React.ReactNode }[] = [
@@ -23,14 +31,115 @@ const MOCK_FORMS = ["Avaliação", "Consórcio", "Orçamento"];
 
 export function NewIntegrationModal({
   onClose,
-  onCreate
+  onCreate,
+  editingConnection
 }: {
   onClose: () => void;
   onCreate: (connection: Connection) => void;
+  editingConnection?: Connection | null;
 }) {
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [providerId, setProviderId] = useState<ProviderId | null>(null);
   const [selectedForms, setSelectedForms] = useState<Set<string>>(new Set(MOCK_FORMS.slice(0, 3)));
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Kommo state
+  const [kommoSubdomain, setKommoSubdomain] = useState("");
+  const [kommoToken, setKommoToken] = useState("");
+  const [kommoPipeline, setKommoPipeline] = useState("");
+  const [kommoStatus, setKommoStatus] = useState("");
+
+  // Sheets state
+  const [sheetsEmail, setSheetsEmail] = useState("");
+  const [sheetsKey, setSheetsKey] = useState("");
+  const [sheetsId, setSheetsId] = useState("");
+  const [sheetsName, setSheetsName] = useState("");
+
+  // Evolution state
+  const [evoUrl, setEvoUrl] = useState("");
+  const [evoToken, setEvoToken] = useState("");
+  const [evoInstance, setEvoInstance] = useState("");
+  const [evoGroup, setEvoGroup] = useState("");
+
+  // Meta (Facebook) state
+  const [metaToken, setMetaToken] = useState("");
+  const [metaLoadingPages, setMetaLoadingPages] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
+  const [metaPages, setMetaPages] = useState<MetaPage[]>([]);
+  const [metaSelectedPageId, setMetaSelectedPageId] = useState<string | null>(null);
+  const [metaForms, setMetaForms] = useState<MetaLeadForm[]>([]);
+  const [metaLoadingForms, setMetaLoadingForms] = useState(false);
+  const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  const [metaWorkspaceId, setMetaWorkspaceId] = useState<string>("");
+  const [metaNewWorkspaceName, setMetaNewWorkspaceName] = useState("");
+  const [metaSellers, setMetaSellers] = useState<{ name: string; phone: string }[]>([{ name: "", phone: "" }]);
+
+  useEffect(() => {
+    listWorkspaces().then((res) => {
+      if (res.success) setWorkspaces(res.workspaces);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (editingConnection) {
+      if (editingConnection.type) {
+        setProviderId(editingConnection.type as ProviderId);
+        setStep(1); // or 2 for meta, but meta editing will need special handling
+        
+        if (editingConnection.type === "kommo" && editingConnection.config) {
+          setKommoSubdomain(editingConnection.config.subdomain || "");
+          setKommoToken(editingConnection.config.token || "");
+          setKommoPipeline(editingConnection.config.pipelineId || "");
+          setKommoStatus(editingConnection.config.statusId || "");
+        } else if (editingConnection.type === "google_sheets" && editingConnection.config) {
+          setSheetsEmail(editingConnection.config.clientEmail || "");
+          setSheetsKey(editingConnection.config.privateKey || "");
+          setSheetsId(editingConnection.config.spreadsheetId || "");
+          setSheetsName(editingConnection.config.sheetName || "");
+        } else if (editingConnection.type === "evolution" && editingConnection.config) {
+          setEvoUrl(editingConnection.config.url || "");
+          setEvoToken(editingConnection.config.token || "");
+          setEvoInstance(editingConnection.config.instanceName || "");
+          setEvoGroup(editingConnection.config.groupJid || "");
+        }
+      }
+    }
+  }, [editingConnection]);
+
+  const handleFetchMetaPages = async () => {
+    setMetaError(null);
+    setMetaLoadingPages(true);
+    const res = await listMetaPages(metaToken);
+    setMetaLoadingPages(false);
+    if (!res.success) {
+      setMetaError(res.error);
+      return;
+    }
+    if (res.pages.length === 0) {
+      setMetaError("Nenhuma página encontrada para este token (verifique as permissões pages_show_list).");
+      return;
+    }
+    setMetaPages(res.pages);
+    setMetaSelectedPageId(res.pages[0].id);
+    setStep(2);
+  };
+
+  useEffect(() => {
+    if (providerId === "meta" && step === 2 && metaSelectedPageId) {
+      const page = metaPages.find(p => p.id === metaSelectedPageId);
+      if (page) {
+        setMetaLoadingForms(true);
+        listMetaForms(page.id, page.access_token).then(res => {
+          if (res.success) {
+            setMetaForms(res.forms);
+          } else {
+            setMetaForms([]);
+          }
+          setMetaLoadingForms(false);
+        });
+      }
+    }
+  }, [metaSelectedPageId, providerId, step, metaPages]);
 
   const provider = PROVIDERS.find((p) => p.id === providerId) ?? null;
 
@@ -43,24 +152,162 @@ export function NewIntegrationModal({
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!provider) return;
-    onCreate({
-      id: Date.now().toString(),
-      name: provider.label,
-      providerLabel: `${provider.label} · Access Token`,
-      icon: provider.icon,
-      iconBg: provider.iconBg,
-      status: "connected",
-      maskedToken: "EAAB9ZC••••••••••••••••••P9D",
-      counts: [
-        { value: String(selectedForms.size), label: "formulários" },
-        { value: "1", label: "páginas" },
-        { value: "0", label: "workspaces" }
-      ],
-      syncNote: "Agora mesmo",
-      actions: ["test", "sync", "edit", "disconnect"]
-    });
+    
+    setIsSaving(true);
+    
+    if (provider.id === "kommo") {
+      const res = await saveKommoDestination({
+        subdomain: kommoSubdomain,
+        token: kommoToken,
+        pipelineId: kommoPipeline,
+        statusId: kommoStatus
+      });
+      
+      if (res.success) {
+        onCreate({
+          id: Date.now().toString(),
+          name: `Kommo (${kommoSubdomain})`,
+          providerLabel: "Kommo CRM · API Token",
+          icon: provider.icon,
+          iconBg: provider.iconBg,
+          status: "connected",
+          maskedToken: `${kommoToken.substring(0, 10)}••••••••••`,
+          counts: [
+            { value: "1", label: "pipelines" },
+            { value: "1", label: "contas" },
+            { value: "1", label: "workspaces" }
+          ],
+          syncNote: "Agora mesmo",
+          actions: ["renew", "test", "edit", "disconnect"]
+        });
+      } else {
+        alert("Erro ao salvar Kommo: " + res.error);
+      }
+    } else if (provider.id === "sheets") {
+      const res = await saveGoogleSheetsDestination({
+        clientEmail: sheetsEmail,
+        privateKey: sheetsKey,
+        spreadsheetId: sheetsId,
+        sheetName: sheetsName
+      });
+      
+      if (res.success) {
+        onCreate({
+          id: Date.now().toString(),
+          name: "Google Sheets",
+          providerLabel: "Google Sheets · Service Account",
+          icon: provider.icon,
+          iconBg: provider.iconBg,
+          status: "connected",
+          maskedToken: `${sheetsEmail.split('@')[0]}••••••••••`,
+          counts: [{ value: "1", label: "planilhas" }],
+          syncNote: "Agora mesmo",
+          actions: ["test", "edit", "disconnect"]
+        });
+      } else {
+        alert("Erro ao salvar Sheets: " + res.error);
+      }
+    } else if (provider.id === "evolution") {
+      const res = await saveEvolutionDestination({
+        url: evoUrl,
+        token: evoToken,
+        instanceName: evoInstance,
+        groupJid: evoGroup
+      });
+      
+      if (res.success) {
+        onCreate({
+          id: Date.now().toString(),
+          name: `WhatsApp (${evoInstance})`,
+          providerLabel: "Evolution API · Instance",
+          icon: provider.icon,
+          iconBg: provider.iconBg,
+          status: "connected",
+          maskedToken: `${evoUrl.replace(/^https?:\/\//, '').substring(0, 15)}••••••••••`,
+          counts: [{ value: "1", label: "instância" }],
+          syncNote: "Agora mesmo",
+          actions: ["test", "edit", "disconnect"]
+        });
+      } else {
+        alert("Erro ao salvar WhatsApp: " + res.error);
+      }
+    } else if (provider.id === "meta") {
+      const selectedPage = metaPages.find((p) => p.id === metaSelectedPageId);
+      if (!selectedPage) {
+        alert("Selecione uma página do Facebook.");
+        setIsSaving(false);
+        return;
+      }
+      if (!metaWorkspaceId && !metaNewWorkspaceName.trim()) {
+        alert("Selecione um cliente existente ou informe o nome de um novo cliente.");
+        setIsSaving(false);
+        return;
+      }
+
+      const res = await saveMetaConnection({
+        pageId: selectedPage.id,
+        pageName: selectedPage.name,
+        accessToken: selectedPage.access_token,
+        workspaceId: metaWorkspaceId || undefined,
+        newWorkspaceName: metaWorkspaceId ? undefined : metaNewWorkspaceName,
+      });
+
+      if (!res.success) {
+        alert("Erro ao conectar página do Facebook: " + res.error);
+        setIsSaving(false);
+        return;
+      }
+
+      // Cadastra os vendedores informados e vincula ao rodízio desta página
+      const sellersToAdd = metaSellers.filter((s) => s.name.trim());
+      for (const seller of sellersToAdd) {
+        await addSellerToConnection({
+          workspaceId: res.workspaceId,
+          connectionId: res.connectionId,
+          name: seller.name.trim(),
+          phone: seller.phone.trim() || undefined,
+        });
+      }
+
+      onCreate({
+        id: res.connectionId,
+        name: selectedPage.name,
+        providerLabel: "Meta Business · Page Access Token",
+        icon: provider.icon,
+        iconBg: provider.iconBg,
+        status: "connected",
+        maskedToken: `${selectedPage.access_token.substring(0, 8)}••••••••••`,
+        counts: [
+          { value: "1", label: "páginas" },
+          { value: String(sellersToAdd.length), label: "vendedores" },
+          { value: "1", label: "workspaces" }
+        ],
+        syncNote: "Agora mesmo",
+        actions: ["test", "sync", "edit", "disconnect"]
+      });
+    } else {
+      // Mock para Google Ads / Lead Forms (placeholder — ver docs/PRD-FONTES-DE-ENTRADA.md)
+      onCreate({
+        id: Date.now().toString(),
+        name: provider.label,
+        providerLabel: `${provider.label} · Access Token`,
+        icon: provider.icon,
+        iconBg: provider.iconBg,
+        status: "connected",
+        maskedToken: "EAAB9ZC••••••••••••••••••P9D",
+        counts: [
+          { value: String(selectedForms.size), label: "formulários" },
+          { value: "1", label: "páginas" },
+          { value: "0", label: "workspaces" }
+        ],
+        syncNote: "Agora mesmo",
+        actions: ["test", "sync", "edit", "disconnect"]
+      });
+    }
+    
+    setIsSaving(false);
   };
 
   return (
@@ -74,8 +321,8 @@ export function NewIntegrationModal({
       >
         <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--border2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>Nova integração</div>
-            <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Passo {step + 1} de 3 · nível do sistema</div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{editingConnection ? "Editar integração" : "Nova integração"}</div>
+            <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Passo {step + 1} de {provider?.id === "kommo" || provider?.id === "evolution" || provider?.id === "sheets" ? "2" : "3"} · nível do sistema</div>
           </div>
           <button
             onClick={onClose}
@@ -110,7 +357,38 @@ export function NewIntegrationModal({
             </>
           )}
 
-          {step === 1 && provider && (
+          {step === 1 && provider && provider.id === "meta" && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Autenticação · {provider.label}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+                Cole um Access Token (recomendado: System User, gerado no Business Manager — não expira). Vamos buscar as páginas de verdade na Graph API.
+              </div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Access Token</label>
+              <textarea
+                value={metaToken}
+                onChange={(e) => setMetaToken(e.target.value)}
+                placeholder="EAAB9ZC..."
+                style={{ width: "100%", height: 80, padding: "12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 10, resize: "none" }}
+              />
+
+              {metaError && (
+                <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>
+                  {metaError}
+                </div>
+              )}
+
+              <button
+                onClick={handleFetchMetaPages}
+                disabled={metaLoadingPages || !metaToken.trim()}
+                style={{ width: "100%", height: 42, border: "none", borderRadius: 10, background: "var(--accent)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: metaLoadingPages ? "wait" : "pointer", opacity: metaLoadingPages || !metaToken.trim() ? 0.7 : 1 }}
+              >
+                {metaLoadingPages ? "Buscando páginas..." : "Buscar páginas do Facebook"}
+              </button>
+            </>
+          )}
+
+          {step === 1 && provider && provider.id === "google" && (
             <>
               <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Autenticação · {provider.label}</div>
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>Dois métodos — escolha conforme quem administra a conta.</div>
@@ -154,7 +432,143 @@ export function NewIntegrationModal({
             </>
           )}
 
-          {step === 2 && (
+          {step === 1 && provider && provider.id === "kommo" && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 16 }}>Configuração · {provider.label}</div>
+              
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Subdomínio Kommo</label>
+              <input
+                value={kommoSubdomain}
+                onChange={(e) => setKommoSubdomain(e.target.value)}
+                placeholder="ex: karolineschutz"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16 }}
+              />
+              
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Access Token (JWT)</label>
+              <textarea
+                value={kommoToken}
+                onChange={(e) => setKommoToken(e.target.value)}
+                placeholder="eyJ0eXAiOiJKV1QiLCJhbG..."
+                style={{ width: "100%", height: 80, padding: "12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 16, resize: "none" }}
+              />
+              
+              <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Pipeline ID (Opcional)</label>
+                  <input
+                    value={kommoPipeline}
+                    onChange={(e) => setKommoPipeline(e.target.value)}
+                    placeholder="ex: 13924251"
+                    style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Status ID (Opcional)</label>
+
+
+                  <input
+                    value={kommoStatus}
+                    onChange={(e) => setKommoStatus(e.target.value)}
+                    placeholder="ex: 107449871"
+                    style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {step === 2 && provider && provider.id === "meta" && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 16 }}>
+                <CheckIcon size={15} />
+                {metaPages.length} página(s) encontrada(s) para este token
+              </div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 5, color: "var(--fg2)" }}>Página do Facebook</label>
+              <select
+                value={metaSelectedPageId ?? ""}
+                onChange={(e) => setMetaSelectedPageId(e.target.value)}
+                style={{ width: "100%", height: 38, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 9, background: "var(--input)", color: "var(--fg)", fontSize: 13.5, outline: "none", marginBottom: 14 }}
+              >
+                {metaPages.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 8, color: "var(--fg2)" }}>Formulários detectados nesta página</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 14, maxHeight: 120, overflowY: "auto" }}>
+                {metaLoadingForms ? (
+                  <div style={{ fontSize: 13, color: "var(--muted)", padding: "8px 0" }}>Carregando formulários...</div>
+                ) : metaForms.length > 0 ? (
+                  metaForms.map((form) => (
+                    <div key={form.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, padding: "8px 11px", background: "var(--panel)", borderRadius: 8 }}>
+                      <CheckIcon size={12} style={{ color: "var(--accent)" }} />
+                      {form.name} <span style={{ color: "var(--muted)", fontSize: 11 }}>({form.status})</span>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--muted)", padding: "8px 0" }}>Nenhum formulário ativo encontrado.</div>
+                )}
+              </div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 5, color: "var(--fg2)" }}>Cliente (Workspace)</label>
+              <select
+                value={metaWorkspaceId}
+                onChange={(e) => setMetaWorkspaceId(e.target.value)}
+                style={{ width: "100%", height: 38, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 9, background: "var(--input)", color: "var(--fg)", fontSize: 13.5, outline: "none", marginBottom: 10 }}
+              >
+                <option value="">+ Novo cliente...</option>
+                {workspaces.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+
+              {!metaWorkspaceId && (
+                <input
+                  value={metaNewWorkspaceName}
+                  onChange={(e) => setMetaNewWorkspaceName(e.target.value)}
+                  placeholder="Nome do novo cliente"
+                  style={{ width: "100%", height: 38, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 9, background: "var(--input)", color: "var(--fg)", fontSize: 13.5, outline: "none", marginBottom: 14 }}
+                />
+              )}
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 8, color: "var(--fg2)" }}>Vendedores da fila (rodízio desta página)</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+                {metaSellers.map((seller, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={seller.name}
+                      onChange={(e) => {
+                        const next = [...metaSellers];
+                        next[idx] = { ...next[idx], name: e.target.value };
+                        setMetaSellers(next);
+                      }}
+                      placeholder="Nome do vendedor"
+                      style={{ flex: 2, height: 36, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                    />
+                    <input
+                      value={seller.phone}
+                      onChange={(e) => {
+                        const next = [...metaSellers];
+                        next[idx] = { ...next[idx], phone: e.target.value };
+                        setMetaSellers(next);
+                      }}
+                      placeholder="WhatsApp (opcional)"
+                      style={{ flex: 1, height: 36, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setMetaSellers([...metaSellers, { name: "", phone: "" }])}
+                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0 }}
+              >
+                + Adicionar vendedor
+              </button>
+            </>
+          )}
+
+          {step === 2 && provider && provider.id === "google" && (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 16 }}>
                 <CheckIcon size={15} />
@@ -211,12 +625,13 @@ export function NewIntegrationModal({
           >
             Cancelar
           </button>
-          {step === 2 && (
+          {(step === 2 || (step === 1 && provider && provider.id !== "meta" && provider.id !== "google")) && (
             <button
               onClick={handleSave}
-              style={{ height: 38, padding: "0 18px", border: "none", background: "var(--accent)", color: "#fff", borderRadius: 9, fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}
+              disabled={isSaving}
+              style={{ height: 38, padding: "0 18px", border: "none", background: "var(--accent)", color: "#fff", borderRadius: 9, fontSize: 13.5, fontWeight: 600, cursor: isSaving ? "wait" : "pointer", opacity: isSaving ? 0.7 : 1 }}
             >
-              Salvar integração
+              {isSaving ? "Salvando..." : "Salvar integração"}
             </button>
           )}
         </div>
@@ -224,3 +639,4 @@ export function NewIntegrationModal({
     </div>
   );
 }
+

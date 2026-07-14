@@ -118,7 +118,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, message: "Lead recebido e na fila de processamento." }, { status: 202 });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error("Erro no Webhook de Leads:", error);
     return NextResponse.json(
       { error: "Erro interno ao processar webhook." },

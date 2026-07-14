@@ -16,6 +16,9 @@ export type Connection = {
   counts: { value: string; label: string }[];
   syncNote?: string;
   actions: ActionKey[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  config?: any; // To hold original config data — shape varia por provedor (kommo/sheets/evolution)
+  type?: "kommo" | "google_sheets" | "evolution" | "meta";
 };
 
 const btnBase: React.CSSProperties = {
@@ -36,23 +39,23 @@ const ACTION_LABEL: Record<ActionKey, string> = {
   reconnect: "Reconectar"
 };
 
-function ActionButton({ action }: { action: ActionKey }) {
+function ActionButton({ action, onClick }: { action: ActionKey, onClick?: () => void }) {
   if (action === "disconnect") {
     return (
-      <button style={{ ...btnBase, border: "none", background: "transparent", color: "var(--des-fg)", fontWeight: 600 }}>
+      <button onClick={onClick} style={{ ...btnBase, border: "none", background: "transparent", color: "var(--des-fg)", fontWeight: 600 }}>
         {ACTION_LABEL[action]}
       </button>
     );
   }
   if (action === "renew" || action === "reconnect") {
     return (
-      <button style={{ ...btnBase, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
+      <button onClick={onClick} style={{ ...btnBase, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 600 }}>
         {ACTION_LABEL[action]}
       </button>
     );
   }
   return (
-    <button style={{ ...btnBase, border: "1px solid var(--border)", background: "var(--card)", color: "var(--fg)" }}>
+    <button onClick={onClick} style={{ ...btnBase, border: "1px solid var(--border)", background: "var(--card)", color: "var(--fg)" }}>
       {ACTION_LABEL[action]}
     </button>
   );
@@ -83,7 +86,7 @@ function StatusBadge({ status, reason }: { status: ConnectionStatus; reason?: st
   );
 }
 
-export function ConnectionCard({ connection }: { connection: Connection }) {
+export function ConnectionCard({ connection, onAction }: { connection: Connection, onAction?: (action: ActionKey, connection: Connection) => void }) {
   return (
     <div style={{ background: "var(--card)", borderRadius: 14, boxShadow: "0 0 0 1px var(--ring), var(--shadow)", padding: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -124,7 +127,7 @@ export function ConnectionCard({ connection }: { connection: Connection }) {
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
         {connection.actions.map((action) => (
-          <ActionButton key={action} action={action} />
+          <ActionButton key={action} action={action} onClick={() => onAction?.(action, connection)} />
         ))}
       </div>
     </div>

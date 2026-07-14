@@ -1,5 +1,8 @@
 import { inngest } from "./client";
 import { supabaseAdmin } from "../supabase/client";
+import { sendLeadToKommo } from "../leads/integrations/kommo";
+import { appendLeadToSheets } from "../leads/integrations/sheets";
+import { sendLeadToWhatsApp } from "../leads/integrations/evolution";
 
 // Função auxiliar para normalizar o telefone no formato brasileiro
 function normalizePhone(rawPhone: string): string {
@@ -15,37 +18,13 @@ function normalizePhone(rawPhone: string): string {
   const ddd = num.slice(0, 2);
   let numero = num.slice(2);
 
-  // Lista de DDDs que exigem o dígito 9 no WhatsApp
-  const dddsComNove = [
-    "11", "12", "13", "14", "15", "16", "17", "18", "19",
-    "21", "22", "24", "27"
-  ];
-
-  const exigeNove = dddsComNove.includes(ddd);
-
-  // Adiciona o 9 caso falte nos DDDs que exigem
-  if (exigeNove && numero.length === 8) {
+  // Desde 2016 todos os DDDs do Brasil usam 9 dígitos para celular
+  // (a antiga distinção por DDD só valia durante a migração, hoje é universal).
+  if (numero.length === 8) {
     numero = "9" + numero;
   }
 
-  // Remove o 9 excedente caso o DDD não exija (padrão legado do WhatsApp em algumas APIs)
-  if (!exigeNove && numero.length === 9 && numero.startsWith("9")) {
-    numero = numero.slice(1);
-  }
-
   return "55" + ddd + numero;
-}
-
-// Abreviar o nome do vendedor para enviar no WhatsApp
-function abbreviateName(fullName: string): string {
-  const raw = String(fullName || "")
-    .replace(/_/g, " ")
-    .replace(/\n/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const first = raw.split(" ").filter(Boolean)[0] || "";
-  return first ? first.charAt(0).toUpperCase() + first.slice(1).toLowerCase() : "";
 }
 
 /**
@@ -94,39 +73,74 @@ export const processNewLead = inngest.createFunction(
         utmMedium: rawPayload.utm_medium || "",
         utmContent: rawPayload.utm_content || "",
         utmCampaign: rawPayload.utm_campaign || "",
+        leadgenId: rawPayload.leadgen_id ? String(rawPayload.leadgen_id) : undefined,
         connectionId
       };
     });
 
-    // 2. Deduplicação (Procura se o Lead já existe no CRM desse workspace/cliente)
-    const existingAssignment = await step.run("check-duplicate-lead", async () => {
-      if (!treatedData.email && !treatedData.phone) return null;
+    // 2. Camada 1 — Duplicata de EVENTO (mesmo leadgen_id, ex.: retry do webhook do Meta).
+    // Se já processamos este leadgen_id neste workspace, para tudo aqui: não insere
+    // lead novo, não dispara Kommo/Sheets/WhatsApp de novo.
+    const trueDuplicate = await step.run("check-true-duplicate-event", async () => {
+      if (!treatedData.leadgenId) return null;
+
+      const { data } = await supabaseAdmin
+        .from("gestao_leads")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .eq("leadgen_id", treatedData.leadgenId)
+        .limit(1)
+        .maybeSingle();
+
+      return data?.id || null;
+    });
+
+    if (trueDuplicate) {
+      return { success: true, duplicate: true, leadId: trueDuplicate };
+    }
+
+    // 3. Camada 2 — Lead REENTROU no funil (mesma pessoa, leadgen_id novo).
+    // Se o vendedor anterior ainda está ativo, o lead volta pra ele (sticky) e o
+    // motor sinaliza "lead retornando" na notificação. Se o vendedor saiu, cai no
+    // round robin normal (não gruda em vendedor inativo).
+    const returningLeadInfo = await step.run("check-returning-lead", async () => {
+      if (!treatedData.email && !treatedData.phone) return { stickySellerId: null, previousCount: 0 };
+
+      // Conta quantas vezes essa pessoa já entrou no funil deste cliente (histórico)
+      let countQuery = supabaseAdmin
+        .from("gestao_leads")
+        .select("id", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId);
+      countQuery = treatedData.email
+        ? countQuery.eq("email", treatedData.email)
+        : countQuery.eq("phone", treatedData.phone);
+      const { count } = await countQuery;
 
       let query = supabaseAdmin
         .from("gestao_leads")
-        .select("seller_id")
+        .select("seller_id, gestao_leads_sellers!inner(id, is_active)")
         .eq("workspace_id", workspaceId)
-        .not("seller_id", "is", null);
+        .not("seller_id", "is", null)
+        .eq("gestao_leads_sellers.is_active", true);
 
-      if (treatedData.email) {
-        query = query.eq("email", treatedData.email);
-      } else {
-        query = query.eq("phone", treatedData.phone);
-      }
+      query = treatedData.email
+        ? query.eq("email", treatedData.email)
+        : query.eq("phone", treatedData.phone);
 
       const { data } = await query.limit(1);
-      
-      if (data && data.length > 0) {
-        return data[0].seller_id; // Retorna o ID do vendedor anterior
-      }
 
-      return null;
+      return {
+        stickySellerId: data && data.length > 0 ? data[0].seller_id : null, // Vendedor anterior, ainda ativo
+        previousCount: count || 0
+      };
     });
+    const isReturningLead = !!returningLeadInfo.stickySellerId;
+    const reentryCount = returningLeadInfo.previousCount; // 0 = primeira vez deste lead
 
-    // 3. Distribuição Round Robin Atômica (caso seja lead novo, isolado por Conexão/Cliente)
+    // 4. Distribuição Round Robin Atômica (caso não seja reentrada com vendedor ativo)
     const assignedSellerId = await step.run("execute-distribution", async () => {
-      // Se a deduplicação achou um vendedor, mantém ele
-      if (existingAssignment) return existingAssignment;
+      // Reentrada com vendedor ainda ativo: mantém o mesmo vendedor
+      if (returningLeadInfo.stickySellerId) return returningLeadInfo.stickySellerId;
 
       if (treatedData.connectionId) {
         // Roteamento Atômico Isolado por Conexão (Cliente do Facebook)
@@ -135,7 +149,7 @@ export const processNewLead = inngest.createFunction(
           .maybeSingle();
 
         if (error) throw new Error(`Erro no roteamento atômico por conexão: ${error.message}`);
-        return (seller as any)?.id || null;
+        return (seller as { id: string } | null)?.id || null;
       } else {
         // Roteamento Atômico Global do Workspace (Fallback)
         const { data: seller, error } = await supabaseAdmin
@@ -143,11 +157,11 @@ export const processNewLead = inngest.createFunction(
           .maybeSingle();
 
         if (error) throw new Error(`Erro no roteamento atômico do workspace: ${error.message}`);
-        return (seller as any)?.id || null;
+        return (seller as { id: string } | null)?.id || null;
       }
     });
 
-    // 4. Salva o Lead no Banco de Dados
+    // 5. Salva o Lead no Banco de Dados
     const leadRecord = await step.run("save-lead-to-db", async () => {
       const { data, error } = await supabaseAdmin
         .from("gestao_leads")
@@ -159,6 +173,7 @@ export const processNewLead = inngest.createFunction(
           source: source,
           status: assignedSellerId ? "distributed" : "error",
           seller_id: assignedSellerId,
+          leadgen_id: treatedData.leadgenId,
           raw_data: {
             ...rawPayload,
             treated: treatedData
@@ -171,69 +186,108 @@ export const processNewLead = inngest.createFunction(
       return data;
     });
 
-    // 5. Enviar Notificações via Evolution API (WhatsApp)
-    await step.run("send-whatsapp-notifications", async () => {
-      // Busca a config do Whatsapp do workspace
-      const { data: workspace } = await supabaseAdmin
-        .from("core_workspaces")
-        .select("name, whatsapp_config")
-        .eq("id", workspaceId)
+    // 4.5. Buscar Detalhes do Vendedor (se houver)
+    const sellerDetails = await step.run("get-seller-details", async () => {
+      if (!assignedSellerId) return null;
+      const { data, error } = await supabaseAdmin
+        .from("gestao_leads_sellers")
+        .select("name, phone, crm_user_id")
+        .eq("id", assignedSellerId)
         .single();
-
-      const config = workspace?.whatsapp_config as any;
-      if (!config || !config.url || !config.token || !config.instanceName) {
-        return { success: false, reason: "WhatsApp integration not configured" };
+      if (error) {
+        console.error("Erro ao obter vendedor:", error.message);
+        return null;
       }
-
-      // Função auxiliar de disparo HTTP
-      const sendMsg = async (to: string, text: string) => {
-        try {
-          const res = await fetch(`${config.url}/message/sendText/${config.instanceName}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "apikey": config.token
-            },
-            body: JSON.stringify({
-              number: to,
-              text: text
-            })
-          });
-          return res.ok;
-        } catch (e) {
-          console.error(`Erro ao disparar Evolution para ${to}:`, e);
-          return false;
-        }
-      };
-
-      // Busca dados do vendedor para personalizar e saber o telefone
-      let sellerDetails = null;
-      if (assignedSellerId) {
-        const { data } = await supabaseAdmin
-          .from("gestao_leads_sellers")
-          .select("name, phone")
-          .eq("id", assignedSellerId)
-          .single();
-        sellerDetails = data;
-      }
-
-      // Template Vendedor (1-to-1)
-      if (sellerDetails && sellerDetails.phone) {
-        const abbreviatedSellerName = abbreviateName(sellerDetails.name);
-        const sellerMsg = `Fala ${abbreviatedSellerName}\n\nChegou um *novo Lead* 🔥\n\n> \`${source}\` \n\n👤 *Nome:* ${treatedData.name}\n📧 *Email:* ${treatedData.email || "Não informado"}\n📱 *Telefone:* ${treatedData.phone || "Não informado"}\n💰 *Consórcio:* ${treatedData.interest || "Não informado"}\n🤑 *Total para Investir:* ${treatedData.budget || "Não informado"}\n💰 *Parcela:* ${treatedData.monthly || "Não informado"}\n\n🗓️ _Quando deseja iniciar_: ${treatedData.startTime || "Não informado"}\n\nVamos pra cima!`;
-        
-        await sendMsg(normalizePhone(sellerDetails.phone), sellerMsg);
-      }
-
-      // Template Grupo de Acompanhamento (Caso configurado)
-      if (config.groupJid) {
-        const groupMsg = `🔥 *Novo Lead Recebido!* 🔥\n> \`Lead do ${source}\` \n\n👤 *Nome:* ${treatedData.name}\n📧 *Email:* ${treatedData.email || "Não informado"}\n📱 *Telefone:* ${treatedData.phone || "Não informado"}\n💰 *Consórcio:* ${treatedData.interest || "Não informado"}\n🤑 *Total para Investir:* ${treatedData.budget || "Não informado"}\n💰 *Parcela:* ${treatedData.monthly || "Não informado"}\n\n🗓️ _Quando deseja iniciar_: ${treatedData.startTime || "Não informado"}\n👤 *Vendedor Designado:* ${sellerDetails?.name || "Nenhum (Round Robin Falhou)"}`;
-        
-        await sendMsg(config.groupJid, groupMsg);
-      }
-
-      return { success: true };
+      return data;
     });
+
+    // 4.6. Buscar Destinos Ativos do Workspace
+    const destinations = await step.run("get-destinations", async () => {
+      const { data } = await supabaseAdmin
+        .from("gestao_leads_destinations")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("is_active", true);
+      return data || [];
+    });
+
+    // 4.7. Integrar com Kommo CRM (AmoCRM) se configurado.
+    // Kommo é um destino OPCIONAL (ver regras de destino do lead) — uma falha aqui
+    // NUNCA pode bloquear os destinos OBRIGATÓRIOS (Sheets/WhatsApp) que vêm depois.
+    // Por isso não lança exceção: registra o erro e segue o fluxo.
+    const kommoDest = destinations.find((d) => d.type === "kommo");
+    let kommoResult = null;
+    if (kommoDest) {
+      kommoResult = await step.run("deliver-to-kommo", async () => {
+        const config = kommoDest.config;
+        const res = await sendLeadToKommo(
+          {
+            subdomain: config.subdomain,
+            token: config.token,
+            pipelineId: config.pipelineId ? Number(config.pipelineId) : undefined,
+            statusId: config.statusId ? Number(config.statusId) : undefined,
+            tagId: config.tagId ? Number(config.tagId) : undefined,
+          },
+          { ...treatedData, leadgenId: treatedData.leadgenId, reentryCount },
+          sellerDetails?.crm_user_id || undefined
+        );
+        if (!res.success) {
+          console.error(`Falha no envio ao Kommo (não bloqueia Sheets/WhatsApp): ${res.error}`);
+        }
+        return res;
+      });
+    }
+
+    // 4.8. Integrar com Google Sheets se configurado
+    const sheetsDest = destinations.find((d) => d.type === "google_sheets");
+    let sheetsResult = null;
+    if (sheetsDest) {
+      sheetsResult = await step.run("deliver-to-sheets", async () => {
+        const config = sheetsDest.config;
+        const res = await appendLeadToSheets(
+          {
+            clientEmail: config.clientEmail,
+            privateKey: config.privateKey,
+            spreadsheetId: config.spreadsheetId,
+            sheetName: config.sheetName,
+            fieldMapping: config.fieldMapping,
+          },
+          treatedData,
+          sellerDetails?.name || undefined
+        );
+        if (!res.success) {
+          throw new Error(`Falha no envio ao Google Sheets: ${res.error}`);
+        }
+        return res;
+      });
+    }
+
+    // 5. Enviar Notificações via Evolution API (WhatsApp)
+    const evolutionDest = destinations.find((d) => d.type === "evolution");
+    let whatsappResult = null;
+    if (evolutionDest) {
+      whatsappResult = await step.run("send-whatsapp-notifications", async () => {
+        const config = evolutionDest.config;
+        
+        const res = await sendLeadToWhatsApp(
+          {
+            url: config.url,
+            token: config.token,
+            instanceName: config.instanceName,
+            groupJid: config.groupJid,
+          },
+          treatedData,
+          source,
+          sellerDetails,
+          isReturningLead
+        );
+
+        if (!res.success) {
+          console.warn(`Aviso no disparo do WhatsApp: ${res.reason || res.error}`);
+        }
+        return res;
+      });
+    }
 
     // 6. Registro de Log de Auditoria
     await step.run("audit-log", async () => {
@@ -244,8 +298,13 @@ export const processNewLead = inngest.createFunction(
           action: assignedSellerId ? "round_robin_distribution" : "error",
           details: {
             seller_id: assignedSellerId,
-            existing_assignment: !!existingAssignment,
-            treated_data: treatedData
+            is_returning_lead: isReturningLead,
+            reentry_count: reentryCount,
+            treated_data: treatedData,
+            kommo_lead_id: kommoResult?.leadId || null,
+            kommo_error: kommoResult?.success === false ? kommoResult.error : null,
+            sheets_delivered: !!sheetsResult,
+            whatsapp_delivered: !!whatsappResult?.success
           }
         });
       return true;
