@@ -166,16 +166,20 @@ export async function getDestinations() {
 
 /** Destinos (Kommo/Sheets/Evolution) de UM cliente específico. */
 export async function getDestinationsForWorkspace(workspaceId: string) {
-  const { data: destinations, error } = await supabase
-    .from("gestao_leads_destinations")
-    .select("*")
-    .eq("workspace_id", workspaceId);
+  const [{ data: destinations, error: destError }, { data: metaAdAccounts, error: metaError }] = await Promise.all([
+    supabase.from("gestao_leads_destinations").select("*").eq("workspace_id", workspaceId),
+    supabase.from("gestao_leads_meta_ad_accounts").select("*").eq("workspace_id", workspaceId),
+  ]);
 
-  if (error) {
-    return { success: false as const, error: error.message };
+  if (destError) {
+    return { success: false as const, error: destError.message };
   }
 
-  return { success: true as const, destinations: destinations || [] };
+  return {
+    success: true as const,
+    destinations: destinations || [],
+    metaAdAccounts: metaAdAccounts || [],
+  };
 }
 
 async function getOrCreateWorkspaceId() {

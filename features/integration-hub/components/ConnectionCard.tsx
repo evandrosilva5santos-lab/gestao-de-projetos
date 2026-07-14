@@ -18,7 +18,7 @@ export type Connection = {
   actions: ActionKey[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   config?: any; // To hold original config data — shape varia por provedor (kommo/sheets/evolution)
-  type?: "kommo" | "google_sheets" | "evolution" | "meta";
+  type?: "kommo" | "google_sheets" | "evolution" | "meta" | "meta_ad_accounts";
 };
 
 const btnBase: React.CSSProperties = {

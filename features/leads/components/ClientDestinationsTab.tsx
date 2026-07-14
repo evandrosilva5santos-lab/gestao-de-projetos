@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { PlusIcon } from "./icons/agency-os-icons";
 import { ConnectionCard, NewIntegrationTile, type Connection } from "@/features/integration-hub/components/ConnectionCard";
 import { NewIntegrationModal } from "@/features/integration-hub/components/NewIntegrationModal";
+import { ClientMetaAdAccountsTab } from "./ClientMetaAdAccountsTab";
 import { getDestinationsForWorkspace } from "@/features/integration-hub/actions";
 
 export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [metaModalOpen, setMetaModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
 
   const load = useCallback(() => {
@@ -67,6 +69,26 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
           return null;
         })
         .filter((c): c is Connection => c !== null);
+
+      // Adiciona Meta Ad Accounts se houver
+      if (res.metaAdAccounts && res.metaAdAccounts.length > 0) {
+        const metaCard: Connection = {
+          id: `meta-ad-accounts-${workspaceId}`,
+          name: "Meta Business Manager",
+          providerLabel: "Meta Business Manager · Ad Accounts",
+          icon: <span style={{ fontWeight: 700, fontSize: 14, color: "#0866FF" }}>f</span>,
+          iconBg: "#0866FF",
+          status: "connected",
+          maskedToken: `${res.metaAdAccounts.length} conta(s)`,
+          counts: [{ value: String(res.metaAdAccounts.length), label: "contas de anúncio" }],
+          syncNote: `Última atualização: ${new Date().toLocaleDateString()}`,
+          actions: ["edit"],
+          config: { accounts: res.metaAdAccounts },
+          type: "meta_ad_accounts"
+        };
+        mapped.push(metaCard);
+      }
+
       setConnections(mapped);
     });
   }, [workspaceId]);
@@ -77,8 +99,12 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
 
   const handleAction = (action: string, connection: Connection) => {
     if (action === "edit") {
-      setEditingConnection(connection);
-      setModalOpen(true);
+      if (connection.type === "meta_ad_accounts") {
+        setMetaModalOpen(true);
+      } else {
+        setEditingConnection(connection);
+        setModalOpen(true);
+      }
     }
   };
 
@@ -129,6 +155,31 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
           editingConnection={editingConnection}
           defaultWorkspaceId={workspaceId}
         />
+      )}
+
+      {metaModalOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div style={{ background: "white", borderRadius: 12, padding: 30, maxWidth: 600, maxHeight: "80vh", overflowY: "auto", width: "90%" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Meta Business Manager</h2>
+              <button
+                onClick={() => setMetaModalOpen(false)}
+                style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#666" }}
+              >
+                ✕
+              </button>
+            </div>
+            <ClientMetaAdAccountsTab workspaceId={workspaceId} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20, paddingTop: 20, borderTop: "1px solid #eee" }}>
+              <button
+                onClick={() => setMetaModalOpen(false)}
+                style={{ padding: "8px 16px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", background: "white" }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
