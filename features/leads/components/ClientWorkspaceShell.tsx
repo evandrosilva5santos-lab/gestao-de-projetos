@@ -5,14 +5,17 @@ import { OverviewTab } from "./OverviewTab";
 import { SellersQueueTab } from "./SellersQueueTab";
 import { ClientSourcesTab } from "./ClientSourcesTab";
 import { ClientDestinationsTab } from "./ClientDestinationsTab";
+import { AutomationSequenceTab } from "./AutomationSequenceTab";
 
-type ClientTab = "visao" | "fontes" | "fila" | "destinos";
+type ClientTab = "visao" | "fontes" | "fila" | "destinos" | "automacao";
 
+// Ordem = sequência lógica de configuração: fonte → fila → destinos → automação.
 const TABS: { key: ClientTab; label: string }[] = [
   { key: "visao", label: "Visão Geral" },
   { key: "fontes", label: "Fontes de Entrada" },
   { key: "fila", label: "Fila da Vez" },
-  { key: "destinos", label: "Destinos" }
+  { key: "destinos", label: "Destinos" },
+  { key: "automacao", label: "Automação" }
 ];
 
 export function ClientWorkspaceShell({
@@ -63,6 +66,7 @@ export function ClientWorkspaceShell({
       {tab === "fontes" && <ClientSourcesTab workspaceId={workspaceId} />}
       {tab === "fila" && <SellersQueueTab workspaceId={workspaceId} />}
       {tab === "destinos" && <ClientDestinationsTab workspaceId={workspaceId} />}
+      {tab === "automacao" && <AutomationSequenceTab workspaceId={workspaceId} />}
     </div>
   );
 }

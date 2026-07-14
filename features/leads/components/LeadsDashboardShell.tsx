@@ -6,7 +6,7 @@ import {
   LogoIcon, MotorIcon, CentralIcon, DashboardIcon,
   ClientesIcon, GearIcon, LogsIcon, LogoutIcon, MenuIcon,
   SunIcon, MoonIcon, UserPlusIcon
-} from "./icons/agency-os-icons";
+} from "@/components/icons/agency-os-icons";
 import { OverviewTab } from "./OverviewTab";
 import { ClientsListScreen } from "./ClientsListScreen";
 import { ClientWorkspaceShell } from "./ClientWorkspaceShell";

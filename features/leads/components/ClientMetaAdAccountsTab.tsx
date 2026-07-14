@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { listMetaAdAccounts, saveMetaAdAccounts } from "@/features/integration-hub/actions";
+import { listMetaAdAccounts, saveMetaAdAccounts } from "@/features/_shared/integrations";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 

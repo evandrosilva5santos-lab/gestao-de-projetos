@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { LockIcon, AlertCircleIcon, PlusIcon } from "@/features/leads/components/icons/agency-os-icons";
+import { LockIcon, AlertCircleIcon, PlusIcon } from "@/components/icons/agency-os-icons";
 
 export type ConnectionStatus = "connected" | "disconnected" | "expired";
 export type ActionKey = "test" | "sync" | "renew" | "edit" | "disconnect" | "reconnect";

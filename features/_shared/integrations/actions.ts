@@ -32,6 +32,35 @@ export async function listMetaPages(token: string) {
   return fetchMetaPages(token);
 }
 
+/**
+ * Valida uma conexão Meta já salva e busca os formulários da página ao vivo.
+ * O access_token nunca sai do servidor — só devolvemos a lista de formulários.
+ * Usada tanto pelo botão "Testar" (valida o token) quanto pelo "Sincronizar"
+ * (relista os formulários disponíveis) em Fontes de Entrada.
+ */
+export async function testMetaConnection(connectionId: string) {
+  const { data: conn, error } = await supabase
+    .from("gestao_leads_meta_connections")
+    .select("page_id, page_name, access_token")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (error || !conn) {
+    return { success: false as const, error: "Conexão não encontrada." };
+  }
+
+  const res = await fetchMetaForms(conn.page_id, conn.access_token);
+  if (!res.success) {
+    return { success: false as const, error: res.error };
+  }
+
+  return {
+    success: true as const,
+    pageName: conn.page_name || conn.page_id,
+    forms: res.forms,
+  };
+}
+
 export async function listMetaForms(pageId: string, pageAccessToken: string) {
   return fetchMetaForms(pageId, pageAccessToken);
 }

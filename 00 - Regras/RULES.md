@@ -34,3 +34,18 @@ Este não é um sistema estático. É um SaaS.
 Sempre considere como a Inteligência Artificial pode potencializar a feature. 
 - Mantenha a inteligência centralizada na pasta `/lib/ai/`.
 - Construa "Tools" (ferramentas) no Vercel AI SDK para permitir que os agentes de IA leiam e executem ações autônomas no banco de dados.
+
+### 7. BARREIRA DE IMPORTAÇÃO (FEATURES PORTÁVEIS)
+Uma feature só é "copiável para outro app" se ela **não conhecer** nenhuma outra feature. A regra #4 diz *"não misture features"* — esta define **o mecanismo**.
+
+**Uma pasta `features/[X]/` só pode importar de:**
+1. **Si mesma** (`./` e subpastas).
+2. **`components/`** — UI global compartilhada (`ui/`, `icons/`, `layout/`).
+3. **`lib/`** — serviços e infraestrutura (supabase, ai, providers…).
+4. **`features/_shared/`** — primitivos reutilizados por mais de uma feature.
+
+**PROIBIDO:** `import ... from "@/features/OUTRA_FEATURE"`. Se duas features precisam da mesma coisa (ex: um `ConnectionCard`, um modal de integração), essa coisa **sobe para `features/_shared/`** — nunca uma feature importa da outra. Import cruzado entre features cria dependência circular e destrói a portabilidade.
+
+**Reforço automático (recomendado):** ESLint `no-restricted-imports` com padrão `@/features/*/!(index)` bloqueando import de arquivos internos de outra feature.
+
+**API pública via `index.ts`:** cada feature e cada módulo `_shared` expõe só o que é público num `index.ts` (barrel). Ninguém importa arquivo interno direto — importa do barrel (`@/features/_shared/integrations`). Isso permite refatorar o interior sem quebrar quem consome.

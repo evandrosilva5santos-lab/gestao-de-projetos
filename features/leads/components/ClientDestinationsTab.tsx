@@ -1,11 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { PlusIcon } from "./icons/agency-os-icons";
-import { ConnectionCard, NewIntegrationTile, type Connection } from "@/features/integration-hub/components/ConnectionCard";
-import { NewIntegrationModal } from "@/features/integration-hub/components/NewIntegrationModal";
+import { PlusIcon } from "@/components/icons/agency-os-icons";
+import {
+  ConnectionCard,
+  NewIntegrationTile,
+  NewIntegrationModal,
+  getDestinationsForWorkspace,
+  type Connection
+} from "@/features/_shared/integrations";
 import { ClientMetaAdAccountsTab } from "./ClientMetaAdAccountsTab";
-import { getDestinationsForWorkspace } from "@/features/integration-hub/actions";
 
 export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) {
   const [connections, setConnections] = useState<Connection[]>([]);

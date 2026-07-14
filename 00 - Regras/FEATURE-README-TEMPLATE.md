@@ -17,5 +17,15 @@ Esta feature depende de algum outro módulo ou serviço externo (ex: WhatsApp AP
 - [ ] Não
 - [ ] Sim (Liste-os)
 
+## 📦 Contrato de Portabilidade (o que copiar junto)
+> Preencha para que qualquer um consiga **arrastar esta feature para outro app** sem quebrar. Regra de Ouro #7: a feature nunca importa de outra feature.
+
+- **Módulos `features/_shared/` usados:** _(ex: `_shared/integrations`)_ — copiar junto.
+- **UI global de `components/`:** _(ex: `components/icons`, `components/ui/dialog`)_ — garantir que existam no destino.
+- **Serviços de `lib/`:** _(ex: `lib/supabase/client`, `lib/leads/providers/meta`)_ — copiar junto.
+- **Tabelas Supabase / migrations:** _(ex: `gestao_leads_sellers`, RPC `assign_next_seller`)_ — rodar as migrations no destino.
+- **Variáveis de ambiente (`.env`):** _(ex: `META_APP_SECRET`, `EVOLUTION_URL`)_.
+- **Import cruzado de outra feature?** ✅ Nenhum (obrigatório). Se houver, é dívida técnica a resolver antes de considerar a feature portável.
+
 ## Notas de Implementação
 Qualquer consideração técnica relevante para futuros desenvolvedores ou agentes de IA que venham a fazer manutenção nesta funcionalidade.

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FacebookIcon } from "@/features/leads/components/FacebookIcon";
-import { XIcon, ChevronRightIcon, CheckIcon } from "@/features/leads/components/icons/agency-os-icons";
+import { FacebookIcon } from "@/components/icons/FacebookIcon";
+import { XIcon, ChevronRightIcon, CheckIcon } from "@/components/icons/agency-os-icons";
 import type { Connection } from "./ConnectionCard";
 import {
   saveKommoDestination,
@@ -13,7 +13,7 @@ import {
   listMetaForms,
   saveMetaConnection,
   addSellerToConnection,
-} from "../actions";
+} from "./actions";
 import type { MetaPage, MetaLeadForm } from "@/lib/leads/providers/meta";
 
 // Porte pixel-exato do modal "Nova integração" de Agency OS.dc.html

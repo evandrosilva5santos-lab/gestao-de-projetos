@@ -1,11 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FacebookIcon } from "@/features/leads/components/FacebookIcon";
-import { LayersIcon, PlusIcon } from "@/features/leads/components/icons/agency-os-icons";
-import { ConnectionCard, NewIntegrationTile, type Connection } from "./ConnectionCard";
-import { NewIntegrationModal } from "./NewIntegrationModal";
-import { getDestinations, listMetaConnections } from "../actions";
+import { FacebookIcon } from "@/components/icons/FacebookIcon";
+import { LayersIcon, PlusIcon } from "@/components/icons/agency-os-icons";
+import {
+  ConnectionCard,
+  NewIntegrationTile,
+  NewIntegrationModal,
+  getDestinations,
+  listMetaConnections,
+  type Connection
+} from "@/features/_shared/integrations";
 
 // Porte pixel-exato da tela "Central de Integrações" de Agency OS.dc.html
 // (linhas ~795-885). TODO (docs/PRD-FONTES-DE-ENTRADA.md): substituir dados

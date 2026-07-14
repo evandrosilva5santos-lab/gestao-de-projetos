@@ -14,14 +14,21 @@ A estrutura do repositório deve obrigatoriamente seguir a seguinte organizaçã
 │   └── api/              # Endpoints e Webhooks (Route Handlers)
 │
 ├── features/             # Módulos de Negócio Independentes (O CORAÇÃO DO APP)
+│   ├── _shared/          # Primitivos usados por +1 feature (portáveis). Ex: integrations/
+│   │   └── [modulo]/     # Cada módulo shared expõe um index.ts (API pública)
 │   ├── [feature-name]/   # Ex: deals, contacts, messaging
 │   │   ├── components/   # UI específica desta feature
 │   │   ├── actions.ts    # Server Actions do Next.js
 │   │   ├── hooks.ts      # TanStack Query Hooks (useQuery, useMutation)
+│   │   ├── index.ts      # API pública da feature (barrel) — importe SEMPRE daqui
 │   │   └── README.md     # Documentação da feature
+│
+│   # ⚠️ REGRA DE OURO #7: uma feature NUNCA importa de outra feature.
+│   #    O que é compartilhado sobe para features/_shared/. Ver RULES.md.
 │
 ├── components/           # Componentes UI Compartilhados e Globais
 │   ├── ui/               # Biblioteca de componentes (shadcn/ui + Radix)
+│   ├── icons/            # Ícones SVG globais (usados por qualquer feature)
 │   └── layout/           # Sidebar, Navbar, Wrappers
 │
 ├── lib/                  # Serviços e Configurações Core
