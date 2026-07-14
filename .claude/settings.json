@@ -4,7 +4,24 @@
       "Bash(grep -oP '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}' \"[Karol Shutz] - Automaçao de entrada de Clientes.json\")",
       "Bash(grep -oP '\"\\(?:id|name\\)\":\\\\s*\"[a-zA-Z0-9_-]{20,}\"' \"[Karol Shutz] - Automaçao de entrada de Clientes.json\")",
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "Bash(PORT=3000 npx tsx scratch/test-lead-karol.ts)",
+      "Bash(curl -s -o /dev/null -w \"Next.js HTTP %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"Inngest Dev HTTP %{http_code}\\\\n\" http://localhost:8288/)",
+      "Bash(mkdir -p \"/Users/evansantoos/Downloads/Organizado/Antigravity/00 - Apps/Gestão de projetos/app/fila/[token]\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"http://localhost:3000/fila/b6b61ef041da2fe1b4b142b95021338be759ea35099c414d\")",
+      "Bash(curl -s \"http://localhost:3000/fila/b6b61ef041da2fe1b4b142b95021338be759ea35099c414d\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(npx eslint *)",
+      "Bash(npx next *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(nohup npx next dev)",
+      "Bash(disown)",
+      "Bash(kill 32910)",
+      "Bash(curl -s http://localhost:3000)"
+    ],
+    "additionalDirectories": [
+      "/Users/evansantoos/Downloads/Organizado/Antigravity/00 - Apps/Gestão de projetos/app/fila"
     ]
   }
 }

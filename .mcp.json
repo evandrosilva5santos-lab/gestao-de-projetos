@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=hjbsdxwozgrepsdvsbul"
+    },
+    "@magicuidesign/mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@magicuidesign/mcp@latest"
+      ]
+    }
+  }
+}

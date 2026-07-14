@@ -5,14 +5,16 @@ import { OverviewTab } from "./OverviewTab";
 import { SellersQueueTab } from "./SellersQueueTab";
 import { ClientSourcesTab } from "./ClientSourcesTab";
 import { ClientDestinationsTab } from "./ClientDestinationsTab";
+import { ClientMetaAdAccountsTab } from "./ClientMetaAdAccountsTab";
 
-type ClientTab = "visao" | "fontes" | "fila" | "destinos";
+type ClientTab = "visao" | "fontes" | "fila" | "destinos" | "meta";
 
 const TABS: { key: ClientTab; label: string }[] = [
   { key: "visao", label: "Visão Geral" },
   { key: "fontes", label: "Fontes de Entrada" },
   { key: "fila", label: "Fila da Vez" },
-  { key: "destinos", label: "Destinos" }
+  { key: "destinos", label: "Destinos" },
+  { key: "meta", label: "Meta Ad Accounts" }
 ];
 
 export function ClientWorkspaceShell({
@@ -63,6 +65,7 @@ export function ClientWorkspaceShell({
       {tab === "fontes" && <ClientSourcesTab workspaceId={workspaceId} />}
       {tab === "fila" && <SellersQueueTab workspaceId={workspaceId} />}
       {tab === "destinos" && <ClientDestinationsTab workspaceId={workspaceId} />}
+      {tab === "meta" && <ClientMetaAdAccountsTab workspaceId={workspaceId} />}
     </div>
   );
 }

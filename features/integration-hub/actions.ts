@@ -1,7 +1,8 @@
 "use server";
 
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
-import { fetchMetaPages, fetchMetaForms } from "@/lib/leads/providers/meta";
+import { fetchMetaPages, fetchMetaForms, fetchMetaAdAccounts } from "@/lib/leads/providers/meta";
+import * as crypto from "crypto";
 
 export async function listWorkspaces() {
   const { data, error } = await supabase
@@ -315,5 +316,89 @@ export async function saveEvolutionDestination(data: {
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function listMetaAdAccounts(bmToken: string, workspaceId?: string) {
+  const result = await fetchMetaAdAccounts(bmToken);
+  if (!result.success) {
+    return { success: false as const, error: result.error };
+  }
+
+  if (!workspaceId) {
+    workspaceId = await getOrCreateWorkspaceId();
+  }
+
+  const { data: existingAccounts } = await supabase
+    .from("gestao_leads_meta_ad_accounts")
+    .select("ad_account_id")
+    .eq("workspace_id", workspaceId);
+
+  const selectedIds = new Set((existingAccounts || []).map((a) => a.ad_account_id));
+
+  return {
+    success: true as const,
+    adAccounts: result.adAccounts.map((account) => ({
+      ...account,
+      isSelected: selectedIds.has(account.id),
+    })),
+  };
+}
+
+export async function saveMetaAdAccounts(data: {
+  workspaceId?: string;
+  bmToken: string;
+  selectedAccountIds: string[];
+}) {
+  try {
+    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
+    const tokenHash = crypto.createHash("sha256").update(data.bmToken).digest("hex");
+
+    const { data: allAccounts } = await supabase
+      .from("gestao_leads_meta_ad_accounts")
+      .select("ad_account_id")
+      .eq("workspace_id", workspaceId)
+      .eq("bm_token_hash", tokenHash);
+
+    const existingIds = new Set((allAccounts || []).map((a) => a.ad_account_id));
+    const newIds = new Set(data.selectedAccountIds);
+
+    const toDelete = Array.from(existingIds).filter((id) => !newIds.has(id));
+    const toAdd = Array.from(newIds).filter((id) => !existingIds.has(id));
+
+    if (toDelete.length > 0) {
+      await supabase
+        .from("gestao_leads_meta_ad_accounts")
+        .delete()
+        .eq("workspace_id", workspaceId)
+        .in("ad_account_id", toDelete);
+    }
+
+    if (toAdd.length > 0) {
+      const result = await fetchMetaAdAccounts(data.bmToken);
+      if (!result.success) {
+        return { success: false as const, error: result.error };
+      }
+
+      const accountMap = new Map(result.adAccounts.map((a) => [a.id, a]));
+      const rowsToInsert = toAdd.map((accountId) => ({
+        workspace_id: workspaceId,
+        ad_account_id: accountId,
+        ad_account_name: accountMap.get(accountId)?.name || accountId,
+        bm_token_hash: tokenHash,
+      }));
+
+      const { error } = await supabase
+        .from("gestao_leads_meta_ad_accounts")
+        .insert(rowsToInsert);
+
+      if (error) {
+        return { success: false as const, error: error.message };
+      }
+    }
+
+    return { success: true as const };
+  } catch (err) {
+    return { success: false as const, error: err instanceof Error ? err.message : String(err) };
   }
 }

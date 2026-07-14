@@ -19,6 +19,8 @@ export function IntegrationHubTab() {
 
   useEffect(() => {
     async function loadDestinations() {
+      const allConnections: Connection[] = [];
+
       const result = await getDestinations();
       if (result.success && result.destinations) {
         const dbConnections: Connection[] = result.destinations.map((d) => {
@@ -75,7 +77,7 @@ export function IntegrationHubTab() {
           return null;
         }).filter(Boolean) as Connection[];
 
-        setConnections((prev) => [...prev, ...dbConnections]);
+        allConnections.push(...dbConnections);
       }
 
       const metaResult = await listMetaConnections();
@@ -97,8 +99,10 @@ export function IntegrationHubTab() {
           type: "meta"
         }));
 
-        setConnections((prev) => [...prev, ...metaConnections]);
+        allConnections.push(...metaConnections);
       }
+
+      setConnections(allConnections);
     }
 
     loadDestinations();
