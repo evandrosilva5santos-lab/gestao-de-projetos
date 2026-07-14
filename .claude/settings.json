@@ -18,7 +18,8 @@
       "Bash(nohup npx next dev)",
       "Bash(disown)",
       "Bash(kill 32910)",
-      "Bash(curl -s http://localhost:3000)"
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")"
     ],
     "additionalDirectories": [
       "/Users/evansantoos/Downloads/Organizado/Antigravity/00 - Apps/Gestão de projetos/app/fila"

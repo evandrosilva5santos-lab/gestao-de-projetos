@@ -249,3 +249,28 @@ export async function getLeadsOverview(workspaceId?: string) {
     }),
   };
 }
+
+export async function getLeadAuditLogs(workspaceId: string, limit = 100) {
+  const { data, error } = await supabase
+    .from("gestao_leads_audit_logs")
+    .select("id, lead_id, action, details, created_at, gestao_leads(name, phone)")
+    .eq("lead_id(workspace_id)", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+
+  const logs = (data || []).map((log) => ({
+    id: log.id,
+    leadId: log.lead_id,
+    action: log.action,
+    timestamp: log.created_at,
+    leadName: typeof log.gestao_leads === "object" && log.gestao_leads?.name ? log.gestao_leads.name : "—",
+    leadPhone: typeof log.gestao_leads === "object" && log.gestao_leads?.phone ? log.gestao_leads.phone : "—",
+    details: log.details as Record<string, unknown> | null,
+  }));
+
+  return { success: true as const, logs };
+}

@@ -43,7 +43,6 @@ export async function sendLeadToWhatsApp(
       return { success: false, reason: "WhatsApp integration not configured correctly" };
     }
 
-    // Função auxiliar de disparo HTTP
     const sendMsg = async (to: string, text: string) => {
       try {
         const res = await fetch(`${config.url}/message/sendText/${config.instanceName}`, {
@@ -76,6 +75,12 @@ export async function sendLeadToWhatsApp(
       const sellerMsg = `Fala ${abbreviatedSellerName}\n\n${returningNotice}Chegou um *novo Lead* 🔥\n\n> \`${source}\` \n\n👤 *Nome:* ${lead.name}\n📧 *Email:* ${lead.email || "Não informado"}\n📱 *Telefone:* ${lead.phone || "Não informado"}\n💰 *Consórcio:* ${lead.interest || "Não informado"}\n🤑 *Total para Investir:* ${lead.budget || "Não informado"}\n💰 *Parcela:* ${lead.monthly || "Não informado"}\n\n🗓️ _Quando deseja iniciar_: ${lead.startTime || "Não informado"}\n\nVamos pra cima!`;
 
       sentToSeller = await sendMsg(formatPhone(sellerDetails.phone), sellerMsg);
+    }
+
+    // Template Grupo (se groupJid configurado)
+    if (config.groupJid && config.groupJid.trim()) {
+      const groupMsg = `*📌 Novo Lead Chegou!*\n\n👤 ${lead.name}\n📱 ${lead.phone || "—"}\n📊 ${source}\n\n🏷️ ${lead.interest || "—"}\n💵 ${lead.budget || "—"}\n\n${sellerDetails ? `👨‍💼 *Vendedor:* ${sellerDetails.name}` : ""}`;
+      sentToGroup = await sendMsg(config.groupJid, groupMsg);
     }
 
     // Template Grupo de Acompanhamento (Caso configurado)
