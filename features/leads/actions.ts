@@ -2,6 +2,47 @@
 
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 
+/** Lista os clientes (workspaces) da agência, com estatísticas rápidas por cliente. */
+export async function listClientWorkspaces() {
+  const { data: workspaces, error } = await supabase
+    .from("core_workspaces")
+    .select("id, name, slug, client_access_token, created_at")
+    .order("name");
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartIso = todayStart.toISOString();
+
+  const results = await Promise.all(
+    (workspaces || []).map(async (ws) => {
+      const [{ count: totalSellers }, { count: activeSellers }, { count: totalLeads }, { count: leadsToday }] = await Promise.all([
+        supabase.from("gestao_leads_sellers").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id),
+        supabase.from("gestao_leads_sellers").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).eq("is_active", true),
+        supabase.from("gestao_leads").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id),
+        supabase.from("gestao_leads").select("id", { count: "exact", head: true }).eq("workspace_id", ws.id).gte("created_at", todayStartIso),
+      ]);
+      return {
+        id: ws.id,
+        name: ws.name,
+        slug: ws.slug,
+        clientAccessToken: ws.client_access_token as string | null,
+        createdAt: ws.created_at as string,
+        totalSellers: totalSellers || 0,
+        activeSellers: activeSellers || 0,
+        activeSellerCount: activeSellers || 0,
+        totalLeads: totalLeads || 0,
+        leadsToday: leadsToday || 0,
+      };
+    })
+  );
+
+  return { success: true as const, workspaces: results };
+}
+
 async function getWorkspaceByToken(token: string) {
   const { data } = await supabase
     .from("core_workspaces")
@@ -140,22 +181,33 @@ function unwrapRelation<T>(rel: T | T[] | null): T | null {
   return Array.isArray(rel) ? rel[0] || null : rel;
 }
 
-export async function getLeadsOverview() {
+export async function getLeadsOverview(workspaceId?: string) {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayStartIso = todayStart.toISOString();
 
+  let receivedQuery = supabase.from("gestao_leads").select("id", { count: "exact", head: true }).gte("created_at", todayStartIso);
+  let distributedQuery = supabase.from("gestao_leads").select("id", { count: "exact", head: true }).eq("status", "distributed").gte("created_at", todayStartIso);
+  let errorQuery = supabase.from("gestao_leads").select("id", { count: "exact", head: true }).eq("status", "error").gte("created_at", todayStartIso);
+  if (workspaceId) {
+    receivedQuery = receivedQuery.eq("workspace_id", workspaceId);
+    distributedQuery = distributedQuery.eq("workspace_id", workspaceId);
+    errorQuery = errorQuery.eq("workspace_id", workspaceId);
+  }
+
   const [{ count: receivedToday }, { count: distributedToday }, { count: errorToday }] = await Promise.all([
-    supabase.from("gestao_leads").select("id", { count: "exact", head: true }).gte("created_at", todayStartIso),
-    supabase.from("gestao_leads").select("id", { count: "exact", head: true }).eq("status", "distributed").gte("created_at", todayStartIso),
-    supabase.from("gestao_leads").select("id", { count: "exact", head: true }).eq("status", "error").gte("created_at", todayStartIso),
+    receivedQuery,
+    distributedQuery,
+    errorQuery,
   ]);
 
-  const { data: recentLeads } = await supabase
+  let recentLeadsQuery = supabase
     .from("gestao_leads")
     .select("id, name, phone, email, source, status, created_at, core_workspaces(name), gestao_leads_sellers(name)")
     .order("created_at", { ascending: false })
     .limit(10);
+  if (workspaceId) recentLeadsQuery = recentLeadsQuery.eq("workspace_id", workspaceId);
+  const { data: recentLeads } = await recentLeadsQuery;
 
   const leads = (recentLeads || []) as unknown as OverviewRawLead[];
   const leadIds = leads.map((l) => l.id);

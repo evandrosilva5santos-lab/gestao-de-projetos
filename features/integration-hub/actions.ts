@@ -134,29 +134,47 @@ export async function addSellerToConnection(data: {
   }
 }
 
+/**
+ * @deprecated Pega "o primeiro workspace" arbitrariamente — só serve enquanto
+ * havia 1 cliente só. Com múltiplos clientes, use getDestinationsForWorkspace.
+ */
 export async function getDestinations() {
   // Try to find the default workspace
   const { data: workspaces, error: wsError } = await supabase
     .from("core_workspaces")
     .select("id")
     .limit(1);
-    
+
   if (wsError || !workspaces || workspaces.length === 0) {
     return { success: false, error: "No workspace found" };
   }
-  
+
   const workspaceId = workspaces[0].id;
-  
+
   const { data: destinations, error } = await supabase
     .from("gestao_leads_destinations")
     .select("*")
     .eq("workspace_id", workspaceId);
-    
+
   if (error) {
     return { success: false, error: error.message };
   }
   
   return { success: true, destinations };
+}
+
+/** Destinos (Kommo/Sheets/Evolution) de UM cliente específico. */
+export async function getDestinationsForWorkspace(workspaceId: string) {
+  const { data: destinations, error } = await supabase
+    .from("gestao_leads_destinations")
+    .select("*")
+    .eq("workspace_id", workspaceId);
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+
+  return { success: true as const, destinations: destinations || [] };
 }
 
 async function getOrCreateWorkspaceId() {
@@ -189,9 +207,10 @@ export async function saveKommoDestination(data: {
   token: string;
   pipelineId?: string;
   statusId?: string;
+  workspaceId?: string;
 }) {
   try {
-    const workspaceId = await getOrCreateWorkspaceId();
+    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
 
     const { error } = await supabase
       .from("gestao_leads_destinations")
@@ -226,9 +245,11 @@ export async function saveGoogleSheetsDestination(data: {
   privateKey: string;
   spreadsheetId: string;
   sheetName: string;
+  fieldMapping?: Record<string, string>;
+  workspaceId?: string;
 }) {
   try {
-    const workspaceId = await getOrCreateWorkspaceId();
+    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
 
     const { error } = await supabase
       .from("gestao_leads_destinations")
@@ -241,6 +262,7 @@ export async function saveGoogleSheetsDestination(data: {
             privateKey: data.privateKey,
             spreadsheetId: data.spreadsheetId,
             sheetName: data.sheetName,
+            fieldMapping: data.fieldMapping || {},
           },
           is_active: true,
           updated_at: new Date().toISOString(),
@@ -263,9 +285,10 @@ export async function saveEvolutionDestination(data: {
   token: string;
   instanceName: string;
   groupJid?: string;
+  workspaceId?: string;
 }) {
   try {
-    const workspaceId = await getOrCreateWorkspaceId();
+    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
 
     const { error } = await supabase
       .from("gestao_leads_destinations")

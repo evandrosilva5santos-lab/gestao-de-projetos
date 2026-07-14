@@ -8,68 +8,76 @@ import {
   SunIcon, MoonIcon, UserPlusIcon
 } from "./icons/agency-os-icons";
 import { OverviewTab } from "./OverviewTab";
-import { SellersQueueTab } from "./SellersQueueTab";
+import { ClientsListScreen } from "./ClientsListScreen";
+import { ClientWorkspaceShell } from "./ClientWorkspaceShell";
 import { ComingSoonPanel } from "./ComingSoonPanel";
 import { IntegrationHubTab } from "@/features/integration-hub/components/IntegrationHubTab";
 
-// Porte pixel-exato de "Agency OS.dc.html" (protótipo de design do usuário).
-// Estrutura, agrupamento de nav, textos e ícones seguem o arquivo original
-// 1:1 — não reorganizar sem conferir contra o .dc.html de origem.
-type ScreenKey = "motor" | "fontes" | "central" | "dashboard" | "crm" | "clientes" | "regras" | "vendedores" | "logs" | "config";
+// Porte pixel-exato de "Agency OS.dc.html" (protótipo de design do usuário),
+// adaptado pra navegação CLIENT-CENTRIC (ver docs/PLANO-REORGANIZACAO-CLIENT-CENTRIC.md):
+// "Clientes" é o eixo — Vendedores/Rodada, Fontes de Entrada e Destinos vivem
+// DENTRO do cliente selecionado (ClientWorkspaceShell), não como itens de nav
+// à parte. "CRM & Funil" foi removido daqui — é o StartCRM, produto separado.
+type ScreenKey = "motor" | "central" | "dashboard" | "clientes" | "regras" | "logs" | "config";
 
 const NAV_GROUPS: { label: string; items: { key: ScreenKey; label: string; Icon: typeof MotorIcon }[] }[] = [
   {
-    label: "MOTOR DE LEADS",
+    label: "PRINCIPAL",
     items: [
-      { key: "motor", label: "Motor de Processamento", Icon: MotorIcon },
-      { key: "fontes", label: "Fontes de Entrada", Icon: FontesIcon },
-      { key: "central", label: "Central de Integrações", Icon: CentralIcon }
+      { key: "clientes", label: "Clientes (Workspaces)", Icon: ClientesIcon },
+      { key: "dashboard", label: "Visão Geral (Agência)", Icon: DashboardIcon }
     ]
   },
   {
-    label: "PRINCIPAL",
+    label: "AGÊNCIA",
     items: [
-      { key: "dashboard", label: "Dashboard Motor", Icon: DashboardIcon },
-      { key: "crm", label: "CRM & Funil", Icon: CrmIcon },
-      { key: "clientes", label: "Clientes (Workspaces)", Icon: ClientesIcon },
-      { key: "regras", label: "Regras de Roteamento", Icon: GearIcon }
+      { key: "central", label: "Central de Integrações", Icon: CentralIcon },
+      { key: "motor", label: "Motor de Processamento", Icon: MotorIcon }
     ]
   },
   {
     label: "OPERAÇÃO",
     items: [
-      { key: "vendedores", label: "Vendedores & Rodada", Icon: VendedoresIcon },
+      { key: "regras", label: "Regras de Roteamento", Icon: GearIcon },
       { key: "logs", label: "Logs & Automação", Icon: LogsIcon },
       { key: "config", label: "Configurações", Icon: GearIcon }
     ]
   }
 ];
 
-const SCREEN_CONTENT: Partial<Record<ScreenKey, React.ReactNode>> = {
-  dashboard: <OverviewTab />,
-  central: <IntegrationHubTab />,
-  vendedores: <SellersQueueTab />
-};
-
 const COMING_SOON: Partial<Record<ScreenKey, { title: string; description: string }>> = {
   motor: { title: "Motor de Processamento", description: "O coração da plataforma. Todo lead — de qualquer origem — passa por um único fluxo. Idempotente: cada Lead ID é processado uma vez só, mesmo com webhook repetido, timeout ou reinício." },
-  fontes: { title: "Fontes de Entrada", description: "Conecte plataformas geradoras de leads e vincule cada formulário a um workspace — sem cadastrar ID na mão." },
-  crm: { title: "CRM & Funil", description: "Acompanhe e mova leads pelo funil. Módulo consumidor do motor." },
-  clientes: { title: "Clientes (Workspaces)", description: "Cada cliente é um workspace isolado — leads e vendedores próprios." },
   regras: { title: "Regras de Roteamento", description: "Fontes de entrada, método de distribuição e regras por origem." },
   logs: { title: "Logs & Automação", description: "Stream de logs em tempo real, auto-correção e rotas de automação." },
   config: { title: "Configurações", description: "Documentação do produto e modelo de status do funil." }
 };
 
 export function LeadsDashboardShell() {
-  const [screen, setScreen] = useState<ScreenKey>("central");
+  const [screen, setScreen] = useState<ScreenKey>("clientes");
   const [dark, setDark] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<{ id: string; name: string } | null>(null);
 
   const vars = agencyOsThemeVars(dark);
-  const content = SCREEN_CONTENT[screen] ?? (
-    COMING_SOON[screen] && <ComingSoonPanel {...COMING_SOON[screen]!} />
-  );
+
+  let content: React.ReactNode;
+  if (screen === "clientes") {
+    content = selectedWorkspace ? (
+      <ClientWorkspaceShell
+        workspaceId={selectedWorkspace.id}
+        workspaceName={selectedWorkspace.name}
+        onBack={() => setSelectedWorkspace(null)}
+      />
+    ) : (
+      <ClientsListScreen onSelect={(id, name) => setSelectedWorkspace({ id, name })} />
+    );
+  } else if (screen === "dashboard") {
+    content = <OverviewTab />;
+  } else if (screen === "central") {
+    content = <IntegrationHubTab />;
+  } else {
+    content = COMING_SOON[screen] && <ComingSoonPanel {...COMING_SOON[screen]!} />;
+  }
 
   return (
     <div
@@ -128,6 +136,7 @@ export function LeadsDashboardShell() {
                     onClick={() => {
                       setScreen(key);
                       setSidebarOpen(false);
+                      if (key === "clientes") setSelectedWorkspace(null);
                     }}
                     style={{
                       width: "100%",
