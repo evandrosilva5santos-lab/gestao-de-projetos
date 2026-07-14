@@ -5,4 +5,6 @@
 export { ConnectionCard, NewIntegrationTile } from "./ConnectionCard";
 export type { Connection, ConnectionStatus, ActionKey } from "./ConnectionCard";
 export { NewIntegrationModal } from "./NewIntegrationModal";
+export { IntegrationPickerDialog } from "./IntegrationPickerDialog";
+export type { ProviderId } from "./IntegrationPickerDialog";
 export * from "./actions";

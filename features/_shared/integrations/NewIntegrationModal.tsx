@@ -59,6 +59,8 @@ export function NewIntegrationModal({
   const [kommoStatus, setKommoStatus] = useState("");
 
   // Sheets state
+  const [sheetsJsonRaw, setSheetsJsonRaw] = useState("");
+  const [sheetsJsonError, setSheetsJsonError] = useState<string | null>(null);
   const [sheetsEmail, setSheetsEmail] = useState("");
   const [sheetsKey, setSheetsKey] = useState("");
   const [sheetsId, setSheetsId] = useState("");
@@ -227,6 +229,40 @@ export function NewIntegrationModal({
     });
   };
 
+  /**
+   * Cola o conteúdo do arquivo JSON da Service Account e extrai client_email +
+   * private_key sozinho — evita copiar campo por campo do arquivo baixado no
+   * Google Cloud Console.
+   */
+  const handleSheetsJsonPaste = (raw: string) => {
+    setSheetsJsonRaw(raw);
+    setSheetsJsonError(null);
+
+    if (!raw.trim()) {
+      setSheetsEmail("");
+      setSheetsKey("");
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as { client_email?: string; private_key?: string };
+      if (!parsed.client_email || !parsed.private_key) {
+        setSheetsJsonError("JSON válido, mas sem client_email/private_key — confira se é o arquivo certo (tipo 'service_account').");
+        return;
+      }
+      setSheetsEmail(parsed.client_email);
+      setSheetsKey(parsed.private_key);
+    } catch {
+      setSheetsJsonError("Não consegui ler como JSON — cole o conteúdo completo do arquivo baixado no Google Cloud Console.");
+    }
+  };
+
+  /** Aceita tanto o ID puro quanto a URL completa da planilha, extrai o ID sozinho. */
+  const handleSheetsIdInput = (raw: string) => {
+    const match = raw.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    setSheetsId(match ? match[1] : raw.trim());
+  };
+
   const handleSave = async () => {
     if (!provider) return;
     
@@ -262,6 +298,17 @@ export function NewIntegrationModal({
         alert("Erro ao salvar Kommo: " + res.error);
       }
     } else if (provider.id === "sheets") {
+      if (!sheetsEmail.trim() || !sheetsKey.trim()) {
+        alert("Cole o JSON da Service Account — não consegui identificar client_email/private_key.");
+        setIsSaving(false);
+        return;
+      }
+      if (!sheetsId.trim() || !sheetsName.trim()) {
+        alert("Informe a planilha (ID ou link) e o nome da aba.");
+        setIsSaving(false);
+        return;
+      }
+
       const res = await saveGoogleSheetsDestination({
         clientEmail: sheetsEmail,
         privateKey: sheetsKey,
@@ -287,6 +334,12 @@ export function NewIntegrationModal({
         alert("Erro ao salvar Sheets: " + res.error);
       }
     } else if (provider.id === "evolution") {
+      if (!evoUrl.trim() || !evoToken.trim() || !evoInstance.trim()) {
+        alert("Preencha URL, API Key e nome da instância.");
+        setIsSaving(false);
+        return;
+      }
+
       const res = await saveEvolutionDestination({
         url: evoUrl,
         token: evoToken,
@@ -634,6 +687,96 @@ export function NewIntegrationModal({
                     style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
                   />
                 </div>
+              </div>
+            </>
+          )}
+
+          {step === 1 && provider && provider.id === "sheets" && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Configuração · {provider.label}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+                Cole o conteúdo do arquivo JSON da Service Account (baixado no Google Cloud Console) — o e-mail e a chave são extraídos automaticamente.
+              </div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>JSON da Service Account</label>
+              <textarea
+                value={sheetsJsonRaw}
+                onChange={(e) => handleSheetsJsonPaste(e.target.value)}
+                placeholder='{"type": "service_account", "client_email": "...", "private_key": "..."}'
+                style={{ width: "100%", height: 90, padding: "12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 12, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 10, resize: "none" }}
+              />
+
+              {sheetsJsonError && (
+                <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>
+                  {sheetsJsonError}
+                </div>
+              )}
+
+              {sheetsEmail && !sheetsJsonError && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>
+                  <CheckIcon size={15} />
+                  Service account: {sheetsEmail}
+                </div>
+              )}
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Planilha (ID ou link)</label>
+              <input
+                value={sheetsId}
+                onChange={(e) => handleSheetsIdInput(e.target.value)}
+                placeholder="Cole o link da planilha ou só o ID"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16 }}
+              />
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: -10, marginBottom: 16 }}>
+                Lembre de compartilhar a planilha com o e-mail da service account acima (permissão de Editor).
+              </div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Nome da aba</label>
+              <input
+                value={sheetsName}
+                onChange={(e) => setSheetsName(e.target.value)}
+                placeholder="ex: Leads"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+              />
+            </>
+          )}
+
+          {step === 1 && provider && provider.id === "evolution" && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 16 }}>Configuração · {provider.label}</div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>URL da instância</label>
+              <input
+                value={evoUrl}
+                onChange={(e) => setEvoUrl(e.target.value)}
+                placeholder="https://sua-evolution.com"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16 }}
+              />
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>API Key</label>
+              <input
+                value={evoToken}
+                onChange={(e) => setEvoToken(e.target.value)}
+                placeholder="sua apikey"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 16 }}
+              />
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Nome da instância</label>
+              <input
+                value={evoInstance}
+                onChange={(e) => setEvoInstance(e.target.value)}
+                placeholder="ex: Evan_Suporte"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16 }}
+              />
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Grupo WhatsApp (opcional)</label>
+              <input
+                value={evoGroup}
+                onChange={(e) => setEvoGroup(e.target.value)}
+                placeholder="ex: 1203630...@g.us"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+              />
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
+                Deixe em branco se este cliente não tem grupo — a notificação ao vendedor continua funcionando normalmente.
               </div>
             </>
           )}

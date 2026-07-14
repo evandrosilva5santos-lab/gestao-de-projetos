@@ -8,7 +8,9 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import type { ProviderId } from "./NewIntegrationModal";
+// Mantido local (não importado do NewIntegrationModal) para o picker compilar de
+// forma independente. Deve espelhar o union ProviderId do NewIntegrationModal.
+export type ProviderId = "meta" | "google" | "sheets" | "kommo" | "evolution";
 
 type ProviderOption = {
   id: ProviderId;

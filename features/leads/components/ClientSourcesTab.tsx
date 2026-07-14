@@ -7,10 +7,12 @@ import {
   ConnectionCard,
   NewIntegrationTile,
   NewIntegrationModal,
+  IntegrationPickerDialog,
   listMetaConnections,
   testMetaConnection,
   type Connection,
-  type ActionKey
+  type ActionKey,
+  type ProviderId
 } from "@/features/_shared/integrations";
 
 type MetaForm = { id: string; name: string; status: string };
@@ -24,7 +26,8 @@ type CheckResult = {
 
 export function ClientSourcesTab({ workspaceId }: { workspaceId: string }) {
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [chosenProvider, setChosenProvider] = useState<ProviderId | null>(null);
   const [checking, setChecking] = useState<string | null>(null); // connectionId em verificação
   const [result, setResult] = useState<CheckResult | null>(null);
 
@@ -77,11 +80,11 @@ export function ClientSourcesTab({ workspaceId }: { workspaceId: string }) {
           </p>
         </div>
         <button
-          onClick={() => setModalOpen(true)}
+          onClick={() => setPickerOpen(true)}
           style={{ height: 36, display: "inline-flex", alignItems: "center", gap: 7, padding: "0 14px", border: "none", background: "var(--accent)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
         >
           <PlusIcon size={15} />
-          Conectar página
+          Nova integração
         </button>
       </div>
 
@@ -96,18 +99,28 @@ export function ClientSourcesTab({ workspaceId }: { workspaceId: string }) {
             )}
           </div>
         ))}
-        <NewIntegrationTile onClick={() => setModalOpen(true)} />
+        <NewIntegrationTile onClick={() => setPickerOpen(true)} />
       </div>
 
-      {modalOpen && (
+      {/* Passo 0: escolher a plataforma antes de cair no fluxo específico. */}
+      <IntegrationPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onSelect={(providerId) => {
+          setPickerOpen(false);
+          setChosenProvider(providerId);
+        }}
+      />
+
+      {chosenProvider && (
         <NewIntegrationModal
-          onClose={() => setModalOpen(false)}
+          onClose={() => setChosenProvider(null)}
           onCreate={() => {
-            setModalOpen(false);
+            setChosenProvider(null);
             load();
           }}
           defaultWorkspaceId={workspaceId}
-          defaultProviderId="meta"
+          defaultProviderId={chosenProvider}
         />
       )}
 
