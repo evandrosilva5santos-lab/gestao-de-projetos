@@ -61,6 +61,68 @@ export async function toggleSellerActiveByClientToken(token: string, sellerId: s
   return { success: true as const };
 }
 
+interface SellerQueueRaw {
+  id: string;
+  name: string;
+  phone: string | null;
+  is_active: boolean;
+  last_assigned_at: string | null;
+  workspace_id: string;
+  core_workspaces: { name: string } | { name: string }[] | null;
+}
+
+/** Fila da vez de TODOS os clientes (visão interna/admin da agência). */
+export async function getAllSellersQueue() {
+  const { data, error } = await supabase
+    .from("gestao_leads_sellers")
+    .select("id, name, phone, is_active, last_assigned_at, workspace_id, core_workspaces(name)")
+    .order("last_assigned_at", { ascending: true, nullsFirst: true });
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+
+  const rows = (data || []) as unknown as SellerQueueRaw[];
+
+  // Agrupa por cliente — a posição na fila só faz sentido dentro do mesmo workspace.
+  const byWorkspace = new Map<string, { workspaceName: string; sellers: typeof rows }>();
+  for (const row of rows) {
+    const wsName = Array.isArray(row.core_workspaces)
+      ? row.core_workspaces[0]?.name
+      : row.core_workspaces?.name;
+    if (!byWorkspace.has(row.workspace_id)) {
+      byWorkspace.set(row.workspace_id, { workspaceName: wsName || "—", sellers: [] });
+    }
+    byWorkspace.get(row.workspace_id)!.sellers.push(row);
+  }
+
+  const groups = Array.from(byWorkspace.entries()).map(([workspaceId, group]) => ({
+    workspaceId,
+    workspaceName: group.workspaceName,
+    sellers: group.sellers.map((s) => ({
+      id: s.id,
+      name: s.name,
+      phone: s.phone,
+      isActive: s.is_active,
+      lastAssignedAt: s.last_assigned_at,
+    })),
+  }));
+
+  return { success: true as const, groups };
+}
+
+export async function toggleSellerActive(sellerId: string, isActive: boolean) {
+  const { error } = await supabase
+    .from("gestao_leads_sellers")
+    .update({ is_active: isActive })
+    .eq("id", sellerId);
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+  return { success: true as const };
+}
+
 interface OverviewRawLead {
   id: string;
   name: string;
