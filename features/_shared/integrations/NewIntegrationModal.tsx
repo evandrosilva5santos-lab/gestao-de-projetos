@@ -9,12 +9,15 @@ import {
   saveGoogleSheetsDestination,
   saveEvolutionDestination,
   listWorkspaces,
-  listMetaPages,
-  listMetaForms,
+  listSavedSources,
+  saveMetaSource,
+  getSourcePages,
+  resyncSourcePages,
+  getSourceForms,
   saveMetaConnection,
   addSellerToConnection,
 } from "./actions";
-import type { MetaPage, MetaLeadForm } from "@/lib/leads/providers/meta";
+import type { SavedSource, SourcePage, SourceForm } from "./actions";
 
 // Porte pixel-exato do modal "Nova integração" de Agency OS.dc.html
 type ProviderId = "meta" | "google" | "sheets" | "kommo" | "evolution";
@@ -67,14 +70,21 @@ export function NewIntegrationModal({
   const [evoInstance, setEvoInstance] = useState("");
   const [evoGroup, setEvoGroup] = useState("");
 
-  // Meta (Facebook) state
+  // Meta (Facebook) state — a conexão (token) é salva uma vez e reutilizada;
+  // páginas e formulários vêm do cache no banco, não de um fetch a cada abertura.
+  const [savedSources, setSavedSources] = useState<SavedSource[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [addingNewSource, setAddingNewSource] = useState(false);
+  const [metaSourceName, setMetaSourceName] = useState("");
   const [metaToken, setMetaToken] = useState("");
   const [metaLoadingPages, setMetaLoadingPages] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
-  const [metaPages, setMetaPages] = useState<MetaPage[]>([]);
-  const [metaSelectedPageId, setMetaSelectedPageId] = useState<string | null>(null);
-  const [metaForms, setMetaForms] = useState<MetaLeadForm[]>([]);
+  const [sourcePages, setSourcePages] = useState<SourcePage[]>([]);
+  const [selectedSourcePageId, setSelectedSourcePageId] = useState<string | null>(null);
+  const [sourceForms, setSourceForms] = useState<SourceForm[]>([]);
+  const [selectedFormIds, setSelectedFormIds] = useState<Set<string>>(new Set());
   const [metaLoadingForms, setMetaLoadingForms] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
   const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
   const [metaWorkspaceId, setMetaWorkspaceId] = useState<string>(defaultWorkspaceId || "");
   const [metaNewWorkspaceName, setMetaNewWorkspaceName] = useState("");
@@ -83,6 +93,9 @@ export function NewIntegrationModal({
   useEffect(() => {
     listWorkspaces().then((res) => {
       if (res.success) setWorkspaces(res.workspaces);
+    });
+    listSavedSources().then((res) => {
+      if (res.success) setSavedSources(res.sources);
     });
   }, []);
 
@@ -112,44 +125,100 @@ export function NewIntegrationModal({
     }
   }, [editingConnection]);
 
-  const handleFetchMetaPages = async () => {
+  /** Conexão já cadastrada: páginas vêm do cache, sem recolar token nem esperar a Graph API. */
+  const handleUseSource = async (sourceId: string) => {
     setMetaError(null);
     setMetaLoadingPages(true);
-    const res = await listMetaPages(metaToken);
+    const res = await getSourcePages(sourceId);
     setMetaLoadingPages(false);
+
     if (!res.success) {
       setMetaError(res.error);
       return;
     }
-    if (res.pages.length === 0) {
-      setMetaError("Nenhuma página encontrada para este token (verifique as permissões pages_show_list).");
-      return;
-    }
-    setMetaPages(res.pages);
-    setMetaSelectedPageId(res.pages[0].id);
+
+    setSelectedSourceId(sourceId);
+    setSourcePages(res.pages);
+    setSelectedSourcePageId(res.pages[0]?.id ?? null);
     setStep(2);
   };
 
-  useEffect(() => {
-    if (providerId === "meta" && step === 2 && metaSelectedPageId) {
-      const page = metaPages.find(p => p.id === metaSelectedPageId);
-      if (page) {
-        setMetaLoadingForms(true);
-        listMetaForms(page.id, page.access_token).then(res => {
-          if (res.success) {
-            setMetaForms(res.forms);
-          } else {
-            setMetaForms([]);
-          }
-          setMetaLoadingForms(false);
-        });
-      }
+  /** Token novo: valida na Graph API, salva a conexão e cacheia as páginas. */
+  const handleSaveNewSource = async () => {
+    setMetaError(null);
+    setMetaLoadingPages(true);
+    const res = await saveMetaSource({ name: metaSourceName, token: metaToken });
+    setMetaLoadingPages(false);
+
+    if (!res.success) {
+      setMetaError(res.error);
+      return;
     }
-  }, [metaSelectedPageId, providerId, step, metaPages]);
+
+    const refreshed = await listSavedSources();
+    if (refreshed.success) setSavedSources(refreshed.sources);
+
+    setMetaToken("");
+    setAddingNewSource(false);
+    await handleUseSource(res.sourceId);
+  };
+
+  /** Rebusca as páginas na Meta — para quando o cliente criou uma página nova. */
+  const handleResyncPages = async () => {
+    if (!selectedSourceId) return;
+    setMetaError(null);
+    setIsResyncing(true);
+    const res = await resyncSourcePages(selectedSourceId);
+    setIsResyncing(false);
+
+    if (!res.success) {
+      setMetaError(res.error);
+      return;
+    }
+    setSourcePages(res.pages);
+    if (!res.pages.some((p) => p.id === selectedSourcePageId)) {
+      setSelectedSourcePageId(res.pages[0]?.id ?? null);
+    }
+  };
+
+  const loadForms = async (sourcePageId: string, forceSync = false) => {
+    setMetaLoadingForms(true);
+    const res = await getSourceForms(sourcePageId, forceSync);
+    setMetaLoadingForms(false);
+
+    if (!res.success) {
+      setSourceForms([]);
+      setMetaError(res.error);
+      return;
+    }
+
+    setSourceForms(res.forms);
+    // Pré-marca o que já estava monitorado. Página nova entra sem nada marcado:
+    // a escolha é explícita, nunca "todos por padrão".
+    setSelectedFormIds(new Set(res.forms.filter((f) => f.isMonitored).map((f) => f.id)));
+  };
+
+  useEffect(() => {
+    if (providerId === "meta" && step === 2 && selectedSourcePageId) {
+      loadForms(selectedSourcePageId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSourcePageId, providerId, step]);
 
   const provider = PROVIDERS.find((p) => p.id === providerId) ?? null;
 
-  const toggleForm = (form: string) => {
+  /** Seleção real dos formulários Meta — é o que vira `is_monitored` no banco. */
+  const toggleForm = (formId: string) => {
+    setSelectedFormIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(formId)) next.delete(formId);
+      else next.add(formId);
+      return next;
+    });
+  };
+
+  /** Fluxo Google ainda é mock (ver docs/PRD-FONTES-DE-ENTRADA.md). */
+  const toggleMockForm = (form: string) => {
     setSelectedForms((prev) => {
       const next = new Set(prev);
       if (next.has(form)) next.delete(form);
@@ -243,9 +312,14 @@ export function NewIntegrationModal({
         alert("Erro ao salvar WhatsApp: " + res.error);
       }
     } else if (provider.id === "meta") {
-      const selectedPage = metaPages.find((p) => p.id === metaSelectedPageId);
+      const selectedPage = sourcePages.find((p) => p.id === selectedSourcePageId);
       if (!selectedPage) {
         alert("Selecione uma página do Facebook.");
+        setIsSaving(false);
+        return;
+      }
+      if (selectedFormIds.size === 0) {
+        alert("Selecione ao menos um formulário — os não selecionados são ignorados pelo Motor.");
         setIsSaving(false);
         return;
       }
@@ -256,11 +330,10 @@ export function NewIntegrationModal({
       }
 
       const res = await saveMetaConnection({
-        pageId: selectedPage.id,
-        pageName: selectedPage.name,
-        accessToken: selectedPage.access_token,
+        sourcePageId: selectedPage.id,
         workspaceId: metaWorkspaceId || undefined,
         newWorkspaceName: metaWorkspaceId ? undefined : metaNewWorkspaceName,
+        selectedFormIds: Array.from(selectedFormIds),
       });
 
       if (!res.success) {
@@ -280,6 +353,8 @@ export function NewIntegrationModal({
         });
       }
 
+      const source = savedSources.find((s) => s.id === selectedSourceId);
+
       onCreate({
         id: res.connectionId,
         name: selectedPage.name,
@@ -287,9 +362,9 @@ export function NewIntegrationModal({
         icon: provider.icon,
         iconBg: provider.iconBg,
         status: "connected",
-        maskedToken: `${selectedPage.access_token.substring(0, 8)}••••••••••`,
+        maskedToken: source?.maskedToken ?? "••••••••",
         counts: [
-          { value: "1", label: "páginas" },
+          { value: String(selectedFormIds.size), label: "formulários" },
           { value: String(sellersToAdd.length), label: "vendedores" },
           { value: "1", label: "workspaces" }
         ],
@@ -366,12 +441,76 @@ export function NewIntegrationModal({
             </>
           )}
 
-          {step === 1 && provider && provider.id === "meta" && (
+          {step === 1 && provider && provider.id === "meta" && !addingNewSource && (
             <>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Autenticação · {provider.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Conexão · {provider.label}</div>
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
-                Cole um Access Token (recomendado: System User, gerado no Business Manager — não expira). Vamos buscar as páginas de verdade na Graph API.
+                Escolha uma conexão já cadastrada — o token e as páginas ficam salvos, não precisa colar de novo.
               </div>
+
+              {metaError && (
+                <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 12 }}>
+                  {metaError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12, maxHeight: 200, overflowY: "auto" }}>
+                {savedSources.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "var(--muted)", padding: "12px 0" }}>
+                    Nenhuma conexão salva ainda. Cadastre a primeira abaixo — depois dela, é só reutilizar.
+                  </div>
+                ) : (
+                  savedSources.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => handleUseSource(s.id)}
+                      disabled={metaLoadingPages}
+                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", border: "1px solid var(--border)", background: "var(--card)", borderRadius: 10, cursor: metaLoadingPages ? "wait" : "pointer", textAlign: "left", color: "var(--fg)" }}
+                    >
+                      <span style={{ width: 30, height: 30, borderRadius: 8, background: provider.iconBg, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {provider.icon}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 13.5, fontWeight: 600 }}>{s.name}</span>
+                        <span style={{ display: "block", fontSize: 11.5, color: "var(--muted)", fontFamily: "var(--font-geist-mono, monospace)" }}>
+                          {s.maskedToken} · {s.pageCount} página(s)
+                        </span>
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: s.status === "active" ? "var(--em-fg)" : "var(--muted)", flexShrink: 0 }}>
+                        {s.status === "active" ? "Conectado" : s.status}
+                      </span>
+                      <ChevronRightIcon size={16} style={{ color: "var(--faint)", flexShrink: 0 }} />
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <button
+                onClick={() => {
+                  setMetaError(null);
+                  setAddingNewSource(true);
+                }}
+                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0 }}
+              >
+                + Nova conexão (colar token)
+              </button>
+            </>
+          )}
+
+          {step === 1 && provider && provider.id === "meta" && addingNewSource && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Nova conexão · {provider.label}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+                Cole um Access Token (recomendado: System User, gerado no Business Manager — não expira). Ele é salvo uma vez e reutilizado nas próximas integrações.
+              </div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Nome da conexão</label>
+              <input
+                value={metaSourceName}
+                onChange={(e) => setMetaSourceName(e.target.value)}
+                placeholder="ex: BM Agência Start"
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 14 }}
+              />
 
               <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Access Token</label>
               <textarea
@@ -387,13 +526,26 @@ export function NewIntegrationModal({
                 </div>
               )}
 
-              <button
-                onClick={handleFetchMetaPages}
-                disabled={metaLoadingPages || !metaToken.trim()}
-                style={{ width: "100%", height: 42, border: "none", borderRadius: 10, background: "var(--accent)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: metaLoadingPages ? "wait" : "pointer", opacity: metaLoadingPages || !metaToken.trim() ? 0.7 : 1 }}
-              >
-                {metaLoadingPages ? "Buscando páginas..." : "Buscar páginas do Facebook"}
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {savedSources.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setMetaError(null);
+                      setAddingNewSource(false);
+                    }}
+                    style={{ height: 42, padding: "0 16px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--card)", color: "var(--fg)", fontSize: 14, fontWeight: 500, cursor: "pointer" }}
+                  >
+                    Cancelar
+                  </button>
+                )}
+                <button
+                  onClick={handleSaveNewSource}
+                  disabled={metaLoadingPages || !metaToken.trim() || !metaSourceName.trim()}
+                  style={{ flex: 1, height: 42, border: "none", borderRadius: 10, background: "var(--accent)", color: "#fff", fontSize: 14, fontWeight: 600, cursor: metaLoadingPages ? "wait" : "pointer", opacity: metaLoadingPages || !metaToken.trim() || !metaSourceName.trim() ? 0.7 : 1 }}
+                >
+                  {metaLoadingPages ? "Validando e salvando..." : "Validar e salvar conexão"}
+                </button>
+              </div>
             </>
           )}
 
@@ -490,33 +642,70 @@ export function NewIntegrationModal({
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 16 }}>
                 <CheckIcon size={15} />
-                {metaPages.length} página(s) encontrada(s) para este token
+                {sourcePages.length} página(s) nesta conexão
               </div>
 
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 5, color: "var(--fg2)" }}>Página do Facebook</label>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 5 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 500, color: "var(--fg2)" }}>Página do Facebook</label>
+                <button
+                  onClick={handleResyncPages}
+                  disabled={isResyncing}
+                  style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: isResyncing ? "wait" : "pointer", padding: 0 }}
+                >
+                  {isResyncing ? "Sincronizando..." : "Ressincronizar"}
+                </button>
+              </div>
               <select
-                value={metaSelectedPageId ?? ""}
-                onChange={(e) => setMetaSelectedPageId(e.target.value)}
+                value={selectedSourcePageId ?? ""}
+                onChange={(e) => setSelectedSourcePageId(e.target.value)}
                 style={{ width: "100%", height: 38, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 9, background: "var(--input)", color: "var(--fg)", fontSize: 13.5, outline: "none", marginBottom: 14 }}
               >
-                {metaPages.map((p) => (
+                {sourcePages.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
 
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 8, color: "var(--fg2)" }}>Formulários detectados nesta página</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 14, maxHeight: 120, overflowY: "auto" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 500, color: "var(--fg2)" }}>
+                  Formulários a monitorar <span style={{ color: "var(--muted)", fontWeight: 400 }}>({selectedFormIds.size} de {sourceForms.length})</span>
+                </label>
+                <button
+                  onClick={() => selectedSourcePageId && loadForms(selectedSourcePageId, true)}
+                  disabled={metaLoadingForms || !selectedSourcePageId}
+                  style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: metaLoadingForms ? "wait" : "pointer", padding: 0 }}
+                >
+                  Buscar novos
+                </button>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 8 }}>
+                Só os marcados geram lead. Os demais são ignorados pelo Motor.
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 14, maxHeight: 130, overflowY: "auto" }}>
                 {metaLoadingForms ? (
                   <div style={{ fontSize: 13, color: "var(--muted)", padding: "8px 0" }}>Carregando formulários...</div>
-                ) : metaForms.length > 0 ? (
-                  metaForms.map((form) => (
-                    <div key={form.id} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, padding: "8px 11px", background: "var(--panel)", borderRadius: 8 }}>
-                      <CheckIcon size={12} style={{ color: "var(--accent)" }} />
-                      {form.name} <span style={{ color: "var(--muted)", fontSize: 11 }}>({form.status})</span>
-                    </div>
-                  ))
+                ) : sourceForms.length > 0 ? (
+                  sourceForms.map((form) => {
+                    const checked = selectedFormIds.has(form.id);
+                    return (
+                      <label
+                        key={form.id}
+                        onClick={() => toggleForm(form.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, padding: "8px 11px", background: "var(--panel)", borderRadius: 8, cursor: "pointer" }}
+                      >
+                        <span
+                          style={{ width: 16, height: 16, borderRadius: 5, background: checked ? "var(--accent)" : "transparent", border: checked ? "none" : "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                        >
+                          {checked && <CheckIcon size={10} style={{ color: "#fff" }} />}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {form.name}
+                        </span>
+                        {form.status && <span style={{ color: "var(--muted)", fontSize: 11, flexShrink: 0 }}>({form.status})</span>}
+                      </label>
+                    );
+                  })
                 ) : (
-                  <div style={{ fontSize: 13, color: "var(--muted)", padding: "8px 0" }}>Nenhum formulário ativo encontrado.</div>
+                  <div style={{ fontSize: 13, color: "var(--muted)", padding: "8px 0" }}>Nenhum formulário encontrado nesta página.</div>
                 )}
               </div>
 
@@ -603,7 +792,7 @@ export function NewIntegrationModal({
                       <span
                         onClick={(e) => {
                           e.preventDefault();
-                          toggleForm(form);
+                          toggleMockForm(form);
                         }}
                         style={{ width: 16, height: 16, borderRadius: 5, background: checked ? "var(--accent)" : "transparent", border: checked ? "none" : "2px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
                       >

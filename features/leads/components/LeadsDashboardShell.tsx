@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { agencyOsThemeVars } from "../lib/agency-os-theme";
+import { agencyOsThemeVars } from "@/lib/themes/agency-os";
 import {
   LogoIcon, MotorIcon, CentralIcon, DashboardIcon,
   ClientesIcon, GearIcon, LogsIcon, LogoutIcon, MenuIcon,

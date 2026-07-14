@@ -9,6 +9,55 @@ const WebhookSchema = z.object({
   source: z.string().optional(),
 }).passthrough();
 
+/**
+ * O formulário que gerou este lead está marcado como monitorado?
+ *
+ * Retrocompatível de propósito: se a página não tem NENHUM formulário
+ * cadastrado, ela foi conectada antes de existir a seleção de formulários
+ * (conexões atuais em produção) — nesse caso todo lead passa, que é o
+ * comportamento que ela já tinha. O filtro só começa a valer depois que a
+ * página é sincronizada e ganha seus formulários.
+ */
+async function isFormMonitored(pageId: string, formId?: string): Promise<boolean> {
+  const { data: pages, error } = await supabaseAdmin
+    .from("gestao_leads_source_pages")
+    .select("id")
+    .eq("external_page_id", pageId);
+
+  if (error) {
+    console.error("Erro ao resolver a página no cache de fontes:", error);
+    return true; // Na dúvida, nunca perder um lead.
+  }
+
+  const pageIds = (pages || []).map((p) => p.id);
+  if (pageIds.length === 0) {
+    return true; // Conexão legada, sem formulários cadastrados.
+  }
+
+  const { data: forms, error: formsErr } = await supabaseAdmin
+    .from("gestao_leads_source_forms")
+    .select("external_form_id, is_monitored")
+    .in("source_page_id", pageIds);
+
+  if (formsErr) {
+    console.error("Erro ao consultar formulários monitorados:", formsErr);
+    return true;
+  }
+
+  if (!forms || forms.length === 0) {
+    return true; // Página conhecida, mas nunca sincronizada.
+  }
+
+  if (!formId) {
+    // Página já tem formulários configurados, mas o payload não diz de qual
+    // veio. Deixa passar em vez de descartar às cegas.
+    console.warn(`Lead da página ${pageId} chegou sem form_id — aceito sem filtro.`);
+    return true;
+  }
+
+  return forms.some((f) => f.external_form_id === formId && f.is_monitored);
+}
+
 // GET: Desafio de Verificação da Meta (Requisito obrigatório para conectar o Webhook da Meta)
 export async function GET(request: Request) {
   try {
@@ -69,6 +118,29 @@ export async function POST(request: Request) {
       if (!connection) {
         console.warn(`Página Meta ID ${pageId} recebeu leadgen_id ${leadgen_id}, mas não está ativa/mapeada a nenhum cliente.`);
         return NextResponse.json({ error: "Página não autorizada ou não pareada no sistema." }, { status: 404 });
+      }
+
+      // Só entram leads dos formulários que o admin marcou em "Nova integração".
+      // Formulário sem seleção é descartado de propósito — mas fica no log.
+      const allowed = await isFormMonitored(pageId, form_id ? String(form_id) : undefined);
+
+      if (!allowed) {
+        await supabaseAdmin.from("gestao_leads_audit_logs").insert({
+          workspace_id: connection.workspace_id,
+          action: "ignored_unmonitored_form",
+          details: {
+            page_id: pageId,
+            form_id: form_id ? String(form_id) : null,
+            leadgen_id: String(leadgen_id),
+            reason: "Formulário não está marcado como monitorado nesta página.",
+          },
+        });
+
+        // 200 mesmo assim: para a Meta, foi entregue. Reenviar não ajudaria.
+        return NextResponse.json(
+          { success: true, message: "Formulário não monitorado — lead ignorado." },
+          { status: 200 }
+        );
       }
 
       // Envia para o Inngest para processar em segundo plano sem travar a resposta pro Facebook

@@ -19,7 +19,15 @@
       "Bash(disown)",
       "Bash(kill 32910)",
       "Bash(curl -s http://localhost:3000)",
-      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")"
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(npx vercel *)",
+      "Bash(mkdir -p components/icons features/_shared/integrations)",
+      "Bash(git mv *)",
+      "Bash(rmdir features/leads/components/icons)",
+      "Bash(rm -rf .next)",
+      "Bash(echo \"BUILD_EXIT=$?\")",
+      "Bash(break)",
+      "Bash(node -e \"const p=require\\('@base-ui/react/package.json'\\); console.log\\('pkg',p.name,p.version\\); console.log\\(Object.keys\\(require\\('@base-ui/react'\\)\\).filter\\(k=>/dialog/i.test\\(k\\)\\)\\)\")"
     ],
     "additionalDirectories": [
       "/Users/evansantoos/Downloads/Organizado/Antigravity/00 - Apps/Gestão de projetos/app/fila"

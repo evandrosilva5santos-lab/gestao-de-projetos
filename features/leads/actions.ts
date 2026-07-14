@@ -377,7 +377,7 @@ export async function getLeadAuditLogs(workspaceId: string, limit = 100) {
   const { data, error } = await supabase
     .from("gestao_leads_audit_logs")
     .select("id, lead_id, action, details, created_at, gestao_leads(name, phone)")
-    .eq("lead_id(workspace_id)", workspaceId)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(limit);
 

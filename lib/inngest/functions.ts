@@ -295,6 +295,7 @@ export const processNewLead = inngest.createFunction(
         .from("gestao_leads_audit_logs")
         .insert({
           lead_id: leadRecord.id,
+          workspace_id: workspaceId,
           action: assignedSellerId ? "round_robin_distribution" : "error",
           details: {
             seller_id: assignedSellerId,
