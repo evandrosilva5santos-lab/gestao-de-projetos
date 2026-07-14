@@ -262,15 +262,18 @@ export async function getLeadAuditLogs(workspaceId: string, limit = 100) {
     return { success: false as const, error: error.message };
   }
 
-  const logs = (data || []).map((log) => ({
-    id: log.id,
-    leadId: log.lead_id,
-    action: log.action,
-    timestamp: log.created_at,
-    leadName: typeof log.gestao_leads === "object" && log.gestao_leads?.name ? log.gestao_leads.name : "—",
-    leadPhone: typeof log.gestao_leads === "object" && log.gestao_leads?.phone ? log.gestao_leads.phone : "—",
-    details: log.details as Record<string, unknown> | null,
-  }));
+  const logs = (data || []).map((log) => {
+    const lead = Array.isArray(log.gestao_leads) ? log.gestao_leads[0] : log.gestao_leads;
+    return {
+      id: log.id,
+      leadId: log.lead_id,
+      action: log.action,
+      timestamp: log.created_at,
+      leadName: lead?.name || "—",
+      leadPhone: lead?.phone || "—",
+      details: log.details as Record<string, unknown> | null,
+    };
+  });
 
   return { success: true as const, logs };
 }
