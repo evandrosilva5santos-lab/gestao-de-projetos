@@ -527,60 +527,6 @@ export async function createWorkspace(name: string, slug: string) {
   return { success: true as const, workspace: data };
 }
 
-export async function getNotificationConfig(workspaceId: string) {
-  // A conexão Evolution/WhatsApp mora em gestao_leads_destinations (type='evolution'),
-  // no mesmo config JSON que o sender lê (config.url/token/groupJid). Antes isto lia de
-  // gestao_leads_notification_configs, uma tabela que nenhuma UI popula — por isso a aba
-  // sempre aparecia como "desconectada". Lemos do destino real.
-  const { data, error } = await supabase
-    .from("gestao_leads_destinations")
-    .select("config")
-    .eq("workspace_id", workspaceId)
-    .eq("type", "evolution")
-    .maybeSingle();
-  if (error) return { success: false as const, error: error.message };
-  const cfg = (data?.config ?? {}) as { url?: string; token?: string; groupJid?: string };
-  return {
-    success: true as const,
-    config: data
-      ? { evolution_url: cfg.url, evolution_token: cfg.token, group_jid: cfg.groupJid }
-      : null,
-  };
-}
-
-export async function getWhatsAppGroupsHistory(workspaceId: string) {
-  const { data, error } = await supabase
-    .from("gestao_leads_whatsapp_groups")
-    .select("group_id, group_name, group_jid, is_admin, fetched_at")
-    .eq("workspace_id", workspaceId)
-    .order("fetched_at", { ascending: false });
-  
-  if (error) return { success: false as const, error: error.message };
-  return { success: true as const, groups: data };
-}
-
-export async function setActiveWhatsAppGroup(workspaceId: string, groupJid: string) {
-  // Grava o grupo ativo no MESMO destino que o sender consome (config.groupJid),
-  // preservando url/token já configurados.
-  const { data: dest, error: selErr } = await supabase
-    .from("gestao_leads_destinations")
-    .select("id, config")
-    .eq("workspace_id", workspaceId)
-    .eq("type", "evolution")
-    .maybeSingle();
-  if (selErr) return { success: false as const, error: selErr.message };
-  if (!dest) return { success: false as const, error: "Destino Evolution não configurado para este cliente." };
-
-  const newConfig = { ...(dest.config as Record<string, unknown>), groupJid };
-  const { error } = await supabase
-    .from("gestao_leads_destinations")
-    .update({ config: newConfig, updated_at: new Date().toISOString() })
-    .eq("id", dest.id);
-
-  if (error) return { success: false as const, error: error.message };
-  return { success: true as const };
-}
-
 export async function getLeadsWithFilters(
   workspaceId: string,
   filters: {

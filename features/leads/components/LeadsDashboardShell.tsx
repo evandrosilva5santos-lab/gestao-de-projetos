@@ -15,7 +15,6 @@ import { ComingSoonPanel } from "./ComingSoonPanel";
 import { IntegrationHubTab } from "@/features/integration-hub/components/IntegrationHubTab";
 import { LogsTab } from "./LogsTab";
 import { RoutingRulesTab } from "./RoutingRulesTab";
-import { ConfigTab } from "./ConfigTab";
 import { getWorkspaceById } from "../actions";
 
 // Porte pixel-exato de "Agency OS.dc.html" (protótipo de design do usuário),
@@ -23,7 +22,7 @@ import { getWorkspaceById } from "../actions";
 // "Clientes" é o eixo — Vendedores/Rodada, Fontes de Entrada e Destinos vivem
 // DENTRO do cliente selecionado (ClientWorkspaceShell), não como itens de nav
 // à parte. "CRM & Funil" foi removido daqui — é o StartCRM, produto separado.
-type ScreenKey = "motor" | "central" | "dashboard" | "clientes" | "regras" | "logs" | "config";
+type ScreenKey = "motor" | "central" | "dashboard" | "clientes" | "regras" | "logs";
 
 const NAV_GROUPS: { label: string; items: { key: ScreenKey; label: string; Icon: typeof MotorIcon }[] }[] = [
   {
@@ -44,8 +43,7 @@ const NAV_GROUPS: { label: string; items: { key: ScreenKey; label: string; Icon:
     label: "OPERAÇÃO",
     items: [
       { key: "regras", label: "Regras de Roteamento", Icon: GearIcon },
-      { key: "logs", label: "Logs & Automação", Icon: LogsIcon },
-      { key: "config", label: "Configurações", Icon: GearIcon }
+      { key: "logs", label: "Logs & Automação", Icon: LogsIcon }
     ]
   }
 ];
@@ -53,8 +51,7 @@ const NAV_GROUPS: { label: string; items: { key: ScreenKey; label: string; Icon:
 const COMING_SOON: Partial<Record<ScreenKey, { title: string; description: string }>> = {
   motor: { title: "Motor de Processamento", description: "O coração da plataforma. Todo lead — de qualquer origem — passa por um único fluxo. Idempotente: cada Lead ID é processado uma vez só, mesmo com webhook repetido, timeout ou reinício." },
   regras: { title: "Regras de Roteamento", description: "Fontes de entrada, método de distribuição e regras por origem." },
-  logs: { title: "Logs & Automação", description: "Stream de logs em tempo real, auto-correção e rotas de automação." },
-  config: { title: "Configurações", description: "Documentação do produto e modelo de status do funil." }
+  logs: { title: "Logs & Automação", description: "Stream de logs em tempo real, auto-correção e rotas de automação." }
 };
 
 export function LeadsDashboardShell() {
@@ -122,8 +119,6 @@ export function LeadsDashboardShell() {
     content = <RoutingRulesTab workspaceId={workspaceId || undefined} />;
   } else if (screen === "logs") {
     content = <LogsTab workspaceId={workspaceId || undefined} />;
-  } else if (screen === "config") {
-    content = <ConfigTab workspaceId={workspaceId || undefined} />;
   } else {
     content = COMING_SOON[screen] && <ComingSoonPanel {...COMING_SOON[screen]!} />;
   }

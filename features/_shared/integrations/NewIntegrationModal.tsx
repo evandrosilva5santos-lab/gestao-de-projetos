@@ -18,6 +18,8 @@ import {
   addSellerToConnection,
   searchGoogleSpreadsheets,
   listGoogleSheetTabs,
+  getWhatsAppGroupsHistory,
+  syncWhatsAppGroups,
 } from "./actions";
 import type { SavedSource, SourcePage, SourceForm } from "./actions";
 import type { SpreadsheetOption } from "@/lib/leads/integrations/sheets";
@@ -85,6 +87,16 @@ export function NewIntegrationModal({
   const [evoToken, setEvoToken] = useState("");
   const [evoInstance, setEvoInstance] = useState("");
   const [evoGroup, setEvoGroup] = useState("");
+  // Histórico de grupos WhatsApp (seletor dinâmico) — busca fica salva por
+  // workspace, não precisa rebuscar toda vez que alguém abrir a configuração.
+  const [evoGroupHistory, setEvoGroupHistory] = useState<
+    { group_jid: string; group_name: string; is_admin: boolean }[]
+  >([]);
+  const [evoGroupSyncing, setEvoGroupSyncing] = useState(false);
+  const [evoGroupError, setEvoGroupError] = useState<string | null>(null);
+  const [evoGroupSearch, setEvoGroupSearch] = useState("");
+  const [evoGroupOnlyAdmin, setEvoGroupOnlyAdmin] = useState(false);
+  const [evoGroupManual, setEvoGroupManual] = useState(false);
 
   // Meta (Facebook) state — a conexão (token) é salva uma vez e reutilizada;
   // páginas e formulários vêm do cache no banco, não de um fetch a cada abertura.
@@ -140,6 +152,42 @@ export function NewIntegrationModal({
       }
     }
   }, [editingConnection]);
+
+  // Carrega o histórico de grupos já sincronizados pra este cliente assim que a
+  // etapa Evolution abre — evita telas vazias quando alguém já buscou antes.
+  useEffect(() => {
+    if (providerId === "evolution" && defaultWorkspaceId) {
+      getWhatsAppGroupsHistory(defaultWorkspaceId).then((res) => {
+        if (res.success && res.groups) setEvoGroupHistory(res.groups);
+      });
+    }
+  }, [providerId, defaultWorkspaceId]);
+
+  const handleSyncGroups = async () => {
+    if (!defaultWorkspaceId) {
+      setEvoGroupError("Abra esta integração de dentro de um cliente selecionado.");
+      return;
+    }
+    if (!evoUrl || !evoToken || !evoInstance) {
+      setEvoGroupError("Preencha URL, API Key e Nome da instância antes de buscar grupos.");
+      return;
+    }
+    setEvoGroupSyncing(true);
+    setEvoGroupError(null);
+    const res = await syncWhatsAppGroups({
+      workspaceId: defaultWorkspaceId,
+      url: evoUrl,
+      token: evoToken,
+      instanceName: evoInstance,
+    });
+    setEvoGroupSyncing(false);
+    if (res.success) {
+      const historyRes = await getWhatsAppGroupsHistory(defaultWorkspaceId);
+      if (historyRes.success && historyRes.groups) setEvoGroupHistory(historyRes.groups);
+    } else {
+      setEvoGroupError(res.error || "Erro ao buscar grupos.");
+    }
+  };
 
   /** Conexão já cadastrada: páginas vêm do cache, sem recolar token nem esperar a Graph API. */
   const handleUseSource = async (sourceId: string) => {
@@ -939,12 +987,82 @@ export function NewIntegrationModal({
               />
 
               <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Grupo WhatsApp (opcional)</label>
-              <input
-                value={evoGroup}
-                onChange={(e) => setEvoGroup(e.target.value)}
-                placeholder="ex: 1203630...@g.us"
-                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
-              />
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <button
+                  type="button"
+                  onClick={handleSyncGroups}
+                  disabled={evoGroupSyncing || !evoUrl || !evoToken || !evoInstance}
+                  style={{ height: 34, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--card)", color: "var(--fg)", fontSize: 12.5, fontWeight: 600, cursor: evoGroupSyncing ? "wait" : "pointer" }}
+                >
+                  {evoGroupSyncing ? "Buscando... (pode levar até 1 min)" : "Buscar Grupos"}
+                </button>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {evoGroupHistory.length > 0 ? `${evoGroupHistory.length} grupo(s) no histórico` : "Nenhum grupo buscado ainda"}
+                </span>
+              </div>
+              {evoGroupSyncing && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
+                  Consultando todos os grupos da instância na Evolution — em instâncias com muitos
+                  grupos isso pode demorar. Fica salvo depois, não precisa buscar de novo toda vez.
+                </div>
+              )}
+
+              {evoGroupError && (
+                <div style={{ fontSize: 12, color: "#dc2626", marginBottom: 10 }}>{evoGroupError}</div>
+              )}
+
+              {evoGroupHistory.length > 0 && !evoGroupManual && (
+                <>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <input
+                      value={evoGroupSearch}
+                      onChange={(e) => setEvoGroupSearch(e.target.value)}
+                      placeholder="Filtrar por nome..."
+                      style={{ flex: 1, height: 34, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--input)", color: "var(--fg)", fontSize: 12.5, outline: "none" }}
+                    />
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg2)", whiteSpace: "nowrap" }}>
+                      <input type="checkbox" checked={evoGroupOnlyAdmin} onChange={(e) => setEvoGroupOnlyAdmin(e.target.checked)} />
+                      Só admin
+                    </label>
+                  </div>
+                  <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8, marginBottom: 8 }}>
+                    {evoGroupHistory
+                      .filter((g) => !evoGroupOnlyAdmin || g.is_admin)
+                      .filter((g) => !evoGroupSearch || g.group_name.toLowerCase().includes(evoGroupSearch.toLowerCase()))
+                      .map((g) => (
+                        <div
+                          key={g.group_jid}
+                          onClick={() => setEvoGroup(g.group_jid)}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderBottom: "1px solid var(--border)", cursor: "pointer", background: evoGroup === g.group_jid ? "var(--soft-bg)" : "transparent" }}
+                        >
+                          <span style={{ fontSize: 12.5, color: "var(--fg)" }}>
+                            {g.group_name} {g.is_admin && <span style={{ fontSize: 10, color: "var(--accent)" }}>· admin</span>}
+                          </span>
+                          {evoGroup === g.group_jid && <CheckIcon size={14} />}
+                        </div>
+                      ))}
+                  </div>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setEvoGroupManual((m) => !m)}
+                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 8 }}
+              >
+                {evoGroupManual ? "Escolher da lista buscada" : "Colar JID manualmente"}
+              </button>
+
+              {(evoGroupManual || evoGroupHistory.length === 0) && (
+                <input
+                  value={evoGroup}
+                  onChange={(e) => setEvoGroup(e.target.value)}
+                  placeholder="ex: 1203630...@g.us"
+                  style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                />
+              )}
+
               <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
                 Deixe em branco se este cliente não tem grupo — a notificação ao vendedor continua funcionando normalmente.
               </div>

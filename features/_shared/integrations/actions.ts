@@ -719,6 +719,149 @@ export async function saveEvolutionDestination(data: {
   }
 }
 
+export async function getWhatsAppGroupsHistory(workspaceId: string) {
+  const { data, error } = await supabase
+    .from("gestao_leads_whatsapp_groups")
+    .select("group_id, group_name, group_jid, is_admin, fetched_at")
+    .eq("workspace_id", workspaceId)
+    .order("fetched_at", { ascending: false });
+
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const, groups: data };
+}
+
+// Mesma lista de hosts internos/reservados bloqueada em outras integrações que fazem
+// fetch server-side pra URL fornecida pelo usuário (SSRF) — a Evolution real de um
+// tenant é sempre um domínio público.
+function isPrivateOrLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h === "0.0.0.0" || h === "::1") return true;
+  if (/^127\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+}
+
+type EvolutionRawGroup = {
+  id?: string;
+  subject?: string;
+  participants?: { id?: string; phoneNumber?: string; admin?: string | null }[];
+};
+
+/**
+ * Busca os grupos da instância Evolution real do cliente e atualiza o histórico local
+ * (gestao_leads_whatsapp_groups), pra não precisar rebuscar toda vez que alguém for
+ * escolher o grupo de destino. Endpoint confirmado batendo direto na Evolution API:
+ * GET /group/fetchAllGroups/{instance}?getParticipants=true — NÃO é "/groups" (isso
+ * nunca existiu, era um chute de uma versão anterior desta função).
+ * "isAdmin" só é confiável comparando o participante cujo phoneNumber bate com o
+ * ownerJid da própria instância (GET /instance/fetchInstances) — o campo "owner" do
+ * grupo é quem CRIOU o grupo, não necessariamente quem está conectado agora.
+ */
+export async function syncWhatsAppGroups(data: {
+  workspaceId: string;
+  url: string;
+  token: string;
+  instanceName: string;
+}) {
+  const { workspaceId, url, token, instanceName } = data;
+  if (!workspaceId || !url || !token || !instanceName) {
+    return { success: false as const, error: "Preencha URL, API Key e Nome da instância antes de buscar grupos." };
+  }
+
+  let host: URL;
+  try {
+    host = new URL(url);
+  } catch {
+    return { success: false as const, error: "URL da instância inválida." };
+  }
+  if (host.protocol !== "http:" && host.protocol !== "https:") {
+    return { success: false as const, error: "URL deve usar http ou https." };
+  }
+  if (isPrivateOrLoopbackHost(host.hostname)) {
+    return { success: false as const, error: "URL não pode apontar para um host interno/reservado." };
+  }
+
+  const base = host.origin;
+  const instancePath = encodeURIComponent(instanceName);
+
+  try {
+    const [groupsRes, instancesRes] = await Promise.all([
+      fetch(`${base}/group/fetchAllGroups/${instancePath}?getParticipants=true`, {
+        headers: { apikey: token },
+      }),
+      fetch(`${base}/instance/fetchInstances?instanceName=${instancePath}`, {
+        headers: { apikey: token },
+      }),
+    ]);
+
+    if (!groupsRes.ok) {
+      const errText = await groupsRes.text();
+      console.error(`Evolution respondeu ${groupsRes.status} em fetchAllGroups: ${errText}`);
+      return { success: false as const, error: `Evolution respondeu ${groupsRes.status} ao buscar grupos.` };
+    }
+
+    const rawGroups = await groupsRes.json();
+    const groupsArray: EvolutionRawGroup[] = Array.isArray(rawGroups)
+      ? rawGroups
+      : Array.isArray(rawGroups?.data)
+      ? rawGroups.data
+      : [];
+
+    let ownerDigits: string | null = null;
+    if (instancesRes.ok) {
+      const instancesData = await instancesRes.json();
+      const list = Array.isArray(instancesData) ? instancesData : [];
+      const ownerJid: string | undefined = list[0]?.ownerJid;
+      ownerDigits = ownerJid ? ownerJid.replace(/\D/g, "") : null;
+    }
+
+    const groups = groupsArray
+      .map((g) => {
+        const jid = g.id || "";
+        if (!jid) return null;
+        let isAdmin = false;
+        if (ownerDigits && Array.isArray(g.participants)) {
+          const me = g.participants.find((p) => {
+            const num = (p.phoneNumber || p.id || "").replace(/\D/g, "");
+            return num && num === ownerDigits;
+          });
+          isAdmin = me?.admin === "admin" || me?.admin === "superadmin";
+        }
+        return {
+          group_id: jid,
+          group_name: g.subject || "Grupo sem nome",
+          group_jid: jid,
+          is_admin: isAdmin,
+        };
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null);
+
+    const syncedAt = new Date().toISOString();
+
+    if (groups.length > 0) {
+      const { error: dbError } = await supabase.from("gestao_leads_whatsapp_groups").upsert(
+        groups.map((g) => ({ workspace_id: workspaceId, ...g, fetched_at: syncedAt })),
+        { onConflict: "workspace_id,group_jid" }
+      );
+      if (dbError) {
+        console.error("Erro ao gravar grupos sincronizados:", dbError);
+        return { success: false as const, error: "Grupos buscados, mas falha ao salvar o histórico." };
+      }
+    }
+
+    return { success: true as const, groups, syncedAt };
+  } catch (err) {
+    console.error("Erro ao sincronizar grupos WhatsApp:", err);
+    return {
+      success: false as const,
+      error: err instanceof Error ? err.message : "Erro de rede ao contatar a Evolution.",
+    };
+  }
+}
+
 export async function listMetaAdAccounts(bmToken: string, workspaceId?: string) {
   const result = await fetchMetaAdAccounts(bmToken);
   if (!result.success) {
