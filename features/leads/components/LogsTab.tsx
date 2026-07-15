@@ -61,6 +61,8 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
   }, [workspaceId, filters]);
 
   // Carrega Fila de Operação Visual (antigo pipeline)
+  // Nota: Pipeline carrega sempre os últimos 20 leads (sem filtros aplicados)
+  // para manter consistência com sua função de histórico de status, não auditoria filtrada
   useEffect(() => {
     if (!workspaceId) return;
 
@@ -291,10 +293,18 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
                       <td className="p-4 align-middle text-sm text-slate-600">{lead.source}</td>
                       <td className="p-4 align-middle text-sm text-slate-600">{lead.sellerName}</td>
                       <td className="p-4 align-middle text-xs text-slate-500">
-                        {new Intl.DateTimeFormat("pt-BR", {
-                          dateStyle: "short",
-                          timeStyle: "short",
-                        }).format(new Date(lead.createdAt))}
+                        {(() => {
+                          try {
+                            const date = new Date(lead.createdAt);
+                            if (isNaN(date.getTime())) return "—";
+                            return new Intl.DateTimeFormat("pt-BR", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            }).format(date);
+                          } catch {
+                            return "—";
+                          }
+                        })()}
                       </td>
                     </tr>
                   ))}

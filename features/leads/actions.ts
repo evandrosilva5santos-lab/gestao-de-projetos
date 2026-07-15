@@ -632,10 +632,11 @@ export async function getLeadsWithFilters(
     )
   ) as string[];
 
-  // Get sellers for autocomplete from current leads
+  // Get sellers for autocomplete from current filtered leads (not all leads)
   const sellerMap = new Map<string, { id: string; name: string }>();
   filtered.forEach((lead) => {
-    if (lead.seller_id && lead.gestao_leads_sellers) {
+    // Seller ID might be UUID (string) or falsy; guard against both null and empty string
+    if (lead.seller_id && typeof lead.seller_id === "string" && lead.gestao_leads_sellers) {
       const seller = Array.isArray(lead.gestao_leads_sellers)
         ? lead.gestao_leads_sellers[0]
         : lead.gestao_leads_sellers;
@@ -645,6 +646,18 @@ export async function getLeadsWithFilters(
     }
   });
   const availableSellers = Array.from(sellerMap.values());
+
+  // Extract origins and statuses from FILTERED leads, not all leads
+  // This ensures dropdown options match the current results
+  const filteredOrigins = Array.from(new Set(filtered.map((l) => l.source).filter(Boolean))) as string[];
+  const filteredStatuses = Array.from(
+    new Set(
+      filtered
+        .flatMap((l) => (Array.isArray(l.gestao_leads_audit_logs) ? l.gestao_leads_audit_logs : [l.gestao_leads_audit_logs || []]))
+        .map((log) => log?.action)
+        .filter(Boolean)
+    )
+  ) as string[];
 
   return {
     success: true as const,
@@ -661,9 +674,8 @@ export async function getLeadsWithFilters(
         : l.gestao_leads_sellers?.name || "—",
       createdAt: l.created_at,
     })),
-    availableOrigins,
-    availableStatuses,
+    availableOrigins: filteredOrigins,
+    availableStatuses: filteredStatuses,
     availableSellers,
-    totalCount: filtered.length,
   };
 }
