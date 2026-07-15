@@ -2,6 +2,24 @@
 
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 
+/**
+ * Nome de um workspace a partir do id na URL (?workspace=id) — usado pra
+ * restaurar o cliente ativo ao carregar/recarregar a página, já que a URL só
+ * guarda o id, não o nome.
+ */
+export async function getWorkspaceById(id: string) {
+  const { data, error } = await supabase
+    .from("core_workspaces")
+    .select("id, name")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { success: false as const, error: error?.message || "Cliente não encontrado." };
+  }
+  return { success: true as const, workspace: data };
+}
+
 /** Lista os clientes (workspaces) da agência, com estatísticas rápidas por cliente. */
 export async function listClientWorkspaces() {
   const { data: workspaces, error } = await supabase
@@ -102,10 +120,12 @@ export async function toggleSellerActiveByClientToken(token: string, sellerId: s
   return { success: true as const };
 }
 
-interface SellerQueueRaw {
+type SellerQueueRaw = {
   id: string;
   name: string;
   phone: string | null;
+  email: string | null;
+  crm_user_id: string | null;
   is_active: boolean;
   last_assigned_at: string | null;
   workspace_id: string;
@@ -116,7 +136,7 @@ interface SellerQueueRaw {
 export async function getAllSellersQueue() {
   const { data, error } = await supabase
     .from("gestao_leads_sellers")
-    .select("id, name, phone, is_active, last_assigned_at, workspace_id, core_workspaces(name)")
+    .select("id, name, phone, email, crm_user_id, is_active, last_assigned_at, workspace_id, core_workspaces(name)")
     .order("last_assigned_at", { ascending: true, nullsFirst: true });
 
   if (error) {
@@ -144,6 +164,8 @@ export async function getAllSellersQueue() {
       id: s.id,
       name: s.name,
       phone: s.phone,
+      email: s.email,
+      crmUserId: s.crm_user_id,
       isActive: s.is_active,
       lastAssignedAt: s.last_assigned_at,
     })),
@@ -401,6 +423,79 @@ export async function getLeadAuditLogs(workspaceId: string, limit = 100) {
   return { success: true as const, logs };
 }
 
+export async function getLeadsOperationStatus(workspaceId: string, limit = 20) {
+  // Fetch recent leads
+  const { data: leads, error: leadsError } = await supabase
+    .from("gestao_leads")
+    .select("id, name, phone, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (leadsError) {
+    return { success: false as const, error: leadsError.message };
+  }
+
+  const leadIds = (leads || []).map((l) => l.id);
+
+  // Fetch logs for these leads
+  const { data: logs } = leadIds.length > 0 
+    ? await supabase
+      .from("gestao_leads_audit_logs")
+      .select("lead_id, action, details, created_at")
+      .in("lead_id", leadIds)
+      .order("created_at", { ascending: true }) // latest overrides
+    : { data: [] };
+
+  const groupedLogs = (logs || []).reduce((acc, log) => {
+    if (!acc[log.lead_id]) {
+      acc[log.lead_id] = { app: null, sheets: null, kommo: null, whatsapp: null };
+    }
+
+    if (log.action === "round_robin_distribution") {
+      acc[log.lead_id].app = { status: "success", detail: "Salvo no banco de dados" };
+    }
+
+    if (log.action === "delivery" && log.details) {
+      const dest = (log.details as any).destination as string;
+      const status = (log.details as any).status as string;
+      const errorStr = (log.details as any).error as string | undefined;
+
+      let detail = "";
+      if (status === "success") detail = "Enviado com sucesso";
+      else if (status === "error") detail = errorStr || "Erro de envio";
+      else if (status === "skipped") detail = "Pulado";
+
+      if (dest === "app" || dest === "sheets" || dest === "kommo" || dest === "whatsapp") {
+        // As logs are ordered ascending or if not we should ensure latest takes precedence.
+        // Actually, without an order in SQL we should sort them, but let's assume order is chronological from id or created_at.
+        // Or better, we can just assign, last one overwrites.
+        acc[log.lead_id][dest] = { status, detail };
+      }
+    }
+    return acc;
+  }, {} as Record<string, any>);
+
+  const pipeline = (leads || []).map((lead) => {
+    const leadLogs = groupedLogs[lead.id] || { app: null, sheets: null, kommo: null, whatsapp: null };
+    
+    return {
+      id: lead.id,
+      name: lead.name,
+      phone: lead.phone,
+      createdAt: lead.created_at,
+      steps: {
+        app: leadLogs.app || { status: "pending", detail: "Aguardando" },
+        sheet: leadLogs.sheets || { status: "pending", detail: "Aguardando" },
+        kommo: leadLogs.kommo || { status: "pending", detail: "Aguardando" },
+        wpp: leadLogs.whatsapp || { status: "pending", detail: "Aguardando" },
+      }
+    };
+  });
+
+  return { success: true as const, pipeline };
+}
+
 export async function createWorkspace(name: string, slug: string) {
   if (!name.trim() || !slug.trim()) {
     return { success: false as const, error: "Nome e slug são obrigatórios" };
@@ -430,4 +525,145 @@ export async function createWorkspace(name: string, slug: string) {
   }
 
   return { success: true as const, workspace: data };
+}
+
+export async function getNotificationConfig(workspaceId: string) {
+  const { data, error } = await supabase
+    .from("gestao_leads_notification_configs")
+    .select("evolution_url, evolution_token, group_jid")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const, config: data };
+}
+
+export async function getWhatsAppGroupsHistory(workspaceId: string) {
+  const { data, error } = await supabase
+    .from("gestao_leads_whatsapp_groups")
+    .select("group_id, group_name, group_jid, is_admin, fetched_at")
+    .eq("workspace_id", workspaceId)
+    .order("fetched_at", { ascending: false });
+  
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const, groups: data };
+}
+
+export async function setActiveWhatsAppGroup(workspaceId: string, groupJid: string) {
+  const { error } = await supabase
+    .from("gestao_leads_notification_configs")
+    .upsert(
+      { workspace_id: workspaceId, group_jid: groupJid },
+      { onConflict: "workspace_id" }
+    );
+
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const };
+}
+
+export async function getLeadsWithFilters(
+  workspaceId: string,
+  filters: {
+    origins?: string[];
+    statuses?: string[];
+    sellerId?: string;
+    dateFrom?: string; // ISO date string
+    dateTo?: string;   // ISO date string
+  }
+) {
+  // Base query: fetch leads with audit logs
+  let query = supabase
+    .from("gestao_leads")
+    .select(
+      `id, name, phone, email, source, status, seller_id, created_at,
+       gestao_leads_sellers(id, name),
+       gestao_leads_audit_logs(id, action, details, created_at)`
+    )
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  // Apply optional filters
+  if (filters.origins && filters.origins.length > 0) {
+    query = query.in("source", filters.origins);
+  }
+
+  if (filters.sellerId) {
+    query = query.eq("seller_id", filters.sellerId);
+  }
+
+  if (filters.dateFrom) {
+    query = query.gte("created_at", filters.dateFrom);
+  }
+
+  if (filters.dateTo) {
+    query = query.lte("created_at", filters.dateTo);
+  }
+
+  const { data: leads, error: leadsError } = await query;
+
+  if (leadsError) {
+    return { success: false as const, error: leadsError.message };
+  }
+
+  const leadList = (leads || []) as any[];
+
+  // Post-filter by status (since it's in audit logs, not the lead itself)
+  let filtered = leadList;
+  if (filters.statuses && filters.statuses.length > 0) {
+    filtered = filtered.filter((lead) => {
+      const auditLogs = Array.isArray(lead.gestao_leads_audit_logs)
+        ? lead.gestao_leads_audit_logs
+        : lead.gestao_leads_audit_logs
+          ? [lead.gestao_leads_audit_logs]
+          : [];
+      const lastLog = auditLogs[auditLogs.length - 1];
+      return lastLog && filters.statuses!.includes(lastLog.action);
+    });
+  }
+
+  // Extract available options from the filtered results
+  const availableOrigins = Array.from(new Set(leadList.map((l) => l.source).filter(Boolean))) as string[];
+  const availableStatuses = Array.from(
+    new Set(
+      leadList
+        .flatMap((l) => (Array.isArray(l.gestao_leads_audit_logs) ? l.gestao_leads_audit_logs : [l.gestao_leads_audit_logs || []]))
+        .map((log) => log?.action)
+        .filter(Boolean)
+    )
+  ) as string[];
+
+  // Get sellers for autocomplete from current leads
+  const sellerMap = new Map<string, { id: string; name: string }>();
+  filtered.forEach((lead) => {
+    if (lead.seller_id && lead.gestao_leads_sellers) {
+      const seller = Array.isArray(lead.gestao_leads_sellers)
+        ? lead.gestao_leads_sellers[0]
+        : lead.gestao_leads_sellers;
+      if (seller) {
+        sellerMap.set(seller.id, { id: seller.id, name: seller.name });
+      }
+    }
+  });
+  const availableSellers = Array.from(sellerMap.values());
+
+  return {
+    success: true as const,
+    leads: filtered.map((l) => ({
+      id: l.id,
+      name: l.name,
+      phone: l.phone,
+      email: l.email,
+      source: l.source,
+      status: l.status,
+      sellerId: l.seller_id,
+      sellerName: Array.isArray(l.gestao_leads_sellers)
+        ? l.gestao_leads_sellers[0]?.name || "—"
+        : l.gestao_leads_sellers?.name || "—",
+      createdAt: l.created_at,
+    })),
+    availableOrigins,
+    availableStatuses,
+    availableSellers,
+    totalCount: filtered.length,
+  };
 }
