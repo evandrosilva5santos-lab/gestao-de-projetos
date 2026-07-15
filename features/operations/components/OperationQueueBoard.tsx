@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { getOperationQueue, OperationLead, OperationQueueResult, OperationStatus } from "../actions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { CheckCircle2, Clock, XCircle, AlertCircle, RefreshCw } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { ptBR } from "date-fns/locale";
 
 function StatusBadge({ status, error }: { status: OperationStatus; error?: string }) {
   switch (status) {
@@ -163,7 +161,7 @@ export function OperationQueueBoard({ workspaceId }: { workspaceId?: string }) {
                       <div className="font-medium text-slate-900">{lead.name}</div>
                       <div className="text-slate-500 text-xs mt-0.5">{lead.phone || "—"}</div>
                       <div className="text-slate-400 text-[10px] mt-1">
-                        {formatDistanceToNow(new Date(lead.createdAt), { locale: ptBR, addSuffix: true })}
+                        {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(lead.createdAt))}
                       </div>
                     </td>
                     <td className="px-6 py-4 align-top">

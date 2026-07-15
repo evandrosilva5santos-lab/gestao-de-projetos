@@ -184,3 +184,19 @@ Meta envia lead
 **Data:** 2026-07-14 15:58 GMT-3  
 **Tempo total de trabalho:** 4h (leitura + análise + implementação)  
 **Status:** ✅ 3 funcionalidades críticas implementadas, pronto para testar
+
+---
+
+## 🚀 UPDATE: Melhorias UI/UX (Central de Integrações & Fila de Vendedores)
+**Status:** ✅ **DONE** (Implementado recentemente)
+
+### 1. Central de Integrações (`IntegrationHubTab.tsx`)
+- **Agrupamento por Cliente:** A exibição das integrações agora é agrupada por Cliente (Workspace). Cada Cliente possui uma seção em formato de acordeão (accordion) que agrupa apenas as integrações referentes a ele.
+- **Ações:** O `actions.ts` foi atualizado para retornar as informações do workspace (`workspace_id` e nome do workspace) e o `ConnectionCard` foi tipado com essas novas propriedades.
+
+### 2. Fila da Vez (Vendedores) (`SellersQueueTab.tsx`)
+- **Exibição do ID:** O ID do vendedor (`crm_user_id`) agora fica visível abaixo do nome do vendedor na lista.
+- **Seleção em Massa:** 
+  - Adicionado suporte para seleção múltipla de vendedores via checkbox em cada linha.
+  - Adicionado um checkbox principal no cabeçalho para selecionar todos os vendedores da fila.
+  - Botões de ações em massa (`Pausar Selecionados` e `Ativar Selecionados`) aparecem no cabeçalho quando um ou mais vendedores são selecionados.

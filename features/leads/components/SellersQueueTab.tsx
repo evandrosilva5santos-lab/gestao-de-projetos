@@ -14,7 +14,7 @@ import {
   deleteSeller
 } from "../actions";
 
-type Seller = { id: string; name: string; phone: string | null; isActive: boolean; lastAssignedAt: string | null };
+type Seller = { id: string; name: string; phone: string | null; email: string | null; crmUserId: string | null; isActive: boolean; lastAssignedAt: string | null };
 type Group = { workspaceId: string; workspaceName: string; sellers: Seller[] };
 
 function relativeTime(iso: string | null): string {
@@ -43,6 +43,47 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
   const [form, setForm] = useState<SellerForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const handleToggleSelectAll = (sellers: Seller[], checked: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      sellers.forEach(s => {
+        if (checked) next.add(s.id);
+        else next.delete(s.id);
+      });
+      return next;
+    });
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleBulkToggle = async (sellers: Seller[], forceActive: boolean) => {
+    const toUpdate = sellers.filter(s => selectedIds.has(s.id) && s.isActive !== forceActive);
+    if (toUpdate.length === 0) return;
+    
+    // Optimistic update
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        sellers: g.sellers.map((s) => (selectedIds.has(s.id) ? { ...s, isActive: forceActive } : s))
+      }))
+    );
+    
+    // API calls in parallel
+    await Promise.all(toUpdate.map(s => toggleSellerActive(s.id, forceActive)));
+    
+    setSelectedIds(new Set());
+    load();
+  };
 
   const fetchGroups = useCallback(() => {
     getAllSellersQueue().then((res) => {
@@ -166,6 +207,16 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
+                  {group.sellers.some(s => selectedIds.has(s.id)) && (
+                    <>
+                      <Button variant="secondary" className="gap-2" onClick={() => handleBulkToggle(group.sellers, false)}>
+                        Pausar Selecionados
+                      </Button>
+                      <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => handleBulkToggle(group.sellers, true)}>
+                        Ativar Selecionados
+                      </Button>
+                    </>
+                  )}
                   <Button variant="outline" className="gap-2" onClick={load}>
                     <RefreshCw className="w-4 h-4" /> Atualizar
                   </Button>
@@ -181,6 +232,14 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[40px]">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 rounded border-slate-300 accent-indigo-600 cursor-pointer"
+                        checked={group.sellers.length > 0 && group.sellers.every(s => selectedIds.has(s.id))}
+                        onChange={(e) => handleToggleSelectAll(group.sellers, e.target.checked)}
+                      />
+                    </TableHead>
                     <TableHead>Vendedor</TableHead>
                     <TableHead>WhatsApp</TableHead>
                     <TableHead>Último Lead Recebido</TableHead>
@@ -194,7 +253,27 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                     const position = positionOf.get(seller.id);
                     return (
                       <TableRow key={seller.id} className={!seller.isActive ? "opacity-50" : ""}>
-                        <TableCell className="font-semibold text-slate-800">{seller.name}</TableCell>
+                        <TableCell>
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 rounded border-slate-300 accent-indigo-600 cursor-pointer"
+                            checked={selectedIds.has(seller.id)}
+                            onChange={(e) => handleSelectOne(seller.id, e.target.checked)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-semibold text-slate-800 flex items-center gap-2">
+                            {seller.name}
+                            {(!seller.phone || !seller.email) && (
+                              <Badge variant="secondary" className="bg-amber-100 hover:bg-amber-100 text-amber-800 border-amber-200 text-[10px] px-1.5 py-0 whitespace-nowrap" title="Falta telefone ou e-mail">
+                                Incompleto
+                              </Badge>
+                            )}
+                          </div>
+                          {seller.crmUserId && (
+                            <div className="text-slate-400 text-xs mt-0.5" title="ID no Kommo/CRM">ID: {seller.crmUserId}</div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-slate-500 font-mono text-sm">{seller.phone || "—"}</TableCell>
                         <TableCell className="text-slate-600">{relativeTime(seller.lastAssignedAt)}</TableCell>
                         <TableCell>
@@ -241,7 +320,7 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                   })}
                   {group.sellers.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-slate-400">
+                      <TableCell colSpan={7} className="py-8 text-center text-slate-400">
                         Nenhum vendedor nesta fila. Clique em “Adicionar vendedor” para começar.
                       </TableCell>
                     </TableRow>

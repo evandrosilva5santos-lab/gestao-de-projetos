@@ -16,8 +16,11 @@ import {
   getSourceForms,
   saveMetaConnection,
   addSellerToConnection,
+  searchGoogleSpreadsheets,
+  listGoogleSheetTabs,
 } from "./actions";
 import type { SavedSource, SourcePage, SourceForm } from "./actions";
+import type { SpreadsheetOption } from "@/lib/leads/integrations/sheets";
 
 // Porte pixel-exato do modal "Nova integração" de Agency OS.dc.html
 type ProviderId = "meta" | "google" | "sheets" | "kommo" | "evolution";
@@ -65,6 +68,17 @@ export function NewIntegrationModal({
   const [sheetsKey, setSheetsKey] = useState("");
   const [sheetsId, setSheetsId] = useState("");
   const [sheetsName, setSheetsName] = useState("");
+  // Duas formas de escolher a planilha, ambas sempre disponíveis (pedido explícito):
+  // buscar pelo nome (via Drive API da própria Service Account) ou colar o link/ID direto.
+  const [sheetsMode, setSheetsMode] = useState<"search" | "manual">("search");
+  const [sheetsSearchQuery, setSheetsSearchQuery] = useState("");
+  const [sheetsSearchResults, setSheetsSearchResults] = useState<SpreadsheetOption[]>([]);
+  const [sheetsSearching, setSheetsSearching] = useState(false);
+  const [sheetsSearchError, setSheetsSearchError] = useState<string | null>(null);
+  const [selectedSpreadsheetName, setSelectedSpreadsheetName] = useState<string | null>(null);
+  const [sheetsTabs, setSheetsTabs] = useState<string[]>([]);
+  const [sheetsTabsLoading, setSheetsTabsLoading] = useState(false);
+  const [sheetsTabsError, setSheetsTabsError] = useState<string | null>(null);
 
   // Evolution state
   const [evoUrl, setEvoUrl] = useState("");
@@ -252,6 +266,9 @@ export function NewIntegrationModal({
       }
       setSheetsEmail(parsed.client_email);
       setSheetsKey(parsed.private_key);
+      // Já lista as planilhas compartilhadas com esta service account — o usuário
+      // só clica, não precisa nem digitar nada pra ver a lista inicial.
+      handleSearchSheets("", parsed.client_email, parsed.private_key);
     } catch {
       setSheetsJsonError("Não consegui ler como JSON — cole o conteúdo completo do arquivo baixado no Google Cloud Console.");
     }
@@ -261,6 +278,53 @@ export function NewIntegrationModal({
   const handleSheetsIdInput = (raw: string) => {
     const match = raw.match(/\/d\/([a-zA-Z0-9-_]+)/);
     setSheetsId(match ? match[1] : raw.trim());
+    setSelectedSpreadsheetName(null);
+  };
+
+  /**
+   * Busca planilhas que a Service Account enxerga (só as compartilhadas com ela).
+   * Aceita email/key explícitos porque é chamada logo após o parse do JSON,
+   * antes do setState de sheetsEmail/sheetsKey terminar de propagar.
+   */
+  const handleSearchSheets = async (query: string, email?: string, key?: string) => {
+    const clientEmail = email ?? sheetsEmail;
+    const privateKey = key ?? sheetsKey;
+    if (!clientEmail || !privateKey) return;
+
+    setSheetsSearching(true);
+    setSheetsSearchError(null);
+    const res = await searchGoogleSpreadsheets({ clientEmail, privateKey, search: query });
+    setSheetsSearching(false);
+
+    if (!res.success) {
+      setSheetsSearchError(res.error);
+      setSheetsSearchResults([]);
+      return;
+    }
+    setSheetsSearchResults(res.spreadsheets);
+  };
+
+  const handleFetchTabs = async (spreadsheetId: string) => {
+    setSheetsTabsLoading(true);
+    setSheetsTabsError(null);
+    setSheetsTabs([]);
+    const res = await listGoogleSheetTabs({ clientEmail: sheetsEmail, privateKey: sheetsKey, spreadsheetId });
+    setSheetsTabsLoading(false);
+
+    if (!res.success) {
+      setSheetsTabsError(res.error);
+      return;
+    }
+    setSheetsTabs(res.tabs);
+    // Só uma aba? Já seleciona — evita clique redundante quando não há ambiguidade.
+    if (res.tabs.length === 1) setSheetsName(res.tabs[0]);
+  };
+
+  const handleSelectSpreadsheet = (option: SpreadsheetOption) => {
+    setSheetsId(option.id);
+    setSelectedSpreadsheetName(option.name);
+    setSheetsName("");
+    handleFetchTabs(option.id);
   };
 
   const handleSave = async () => {
@@ -719,18 +783,124 @@ export function NewIntegrationModal({
                 </div>
               )}
 
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Planilha (ID ou link)</label>
-              <input
-                value={sheetsId}
-                onChange={(e) => handleSheetsIdInput(e.target.value)}
-                placeholder="Cole o link da planilha ou só o ID"
-                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16 }}
-              />
-              <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: -10, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 500, color: "var(--fg2)" }}>Planilha</label>
+                <div style={{ display: "flex", gap: 4, background: "var(--panel)", borderRadius: 8, padding: 2 }}>
+                  <button
+                    onClick={() => setSheetsMode("search")}
+                    style={{ height: 26, padding: "0 10px", border: "none", borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: sheetsMode === "search" ? "var(--card)" : "transparent", color: sheetsMode === "search" ? "var(--fg)" : "var(--muted)", boxShadow: sheetsMode === "search" ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}
+                  >
+                    Buscar
+                  </button>
+                  <button
+                    onClick={() => setSheetsMode("manual")}
+                    style={{ height: 26, padding: "0 10px", border: "none", borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: "pointer", background: sheetsMode === "manual" ? "var(--card)" : "transparent", color: sheetsMode === "manual" ? "var(--fg)" : "var(--muted)", boxShadow: sheetsMode === "manual" ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}
+                  >
+                    Colar link
+                  </button>
+                </div>
+              </div>
+
+              {sheetsMode === "search" ? (
+                <>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    <input
+                      value={sheetsSearchQuery}
+                      onChange={(e) => setSheetsSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSearchSheets(sheetsSearchQuery)}
+                      placeholder="Digite o nome da planilha..."
+                      style={{ flex: 1, height: 38, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 9, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                    />
+                    <button
+                      onClick={() => handleSearchSheets(sheetsSearchQuery)}
+                      disabled={sheetsSearching || !sheetsEmail}
+                      style={{ height: 38, padding: "0 14px", border: "none", borderRadius: 9, background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 600, cursor: sheetsSearching ? "wait" : "pointer", opacity: sheetsSearching || !sheetsEmail ? 0.6 : 1 }}
+                    >
+                      {sheetsSearching ? "..." : "Buscar"}
+                    </button>
+                  </div>
+
+                  {sheetsSearchError && (
+                    <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>
+                      {sheetsSearchError}
+                    </div>
+                  )}
+
+                  {!sheetsSearchError && sheetsEmail && sheetsSearchResults.length === 0 && !sheetsSearching && (
+                    <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "8px 0", marginBottom: 10 }}>
+                      Nenhuma planilha compartilhada com {sheetsEmail} ainda. Compartilhe a planilha com este e-mail (permissão de Editor) e busque de novo.
+                    </div>
+                  )}
+
+                  {selectedSpreadsheetName && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 8, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 10 }}>
+                      <CheckIcon size={13} />
+                      Selecionada: {selectedSpreadsheetName}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14, maxHeight: 150, overflowY: "auto" }}>
+                    {sheetsSearchResults.map((option) => {
+                      const selected = sheetsId === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          onClick={() => handleSelectSpreadsheet(option)}
+                          style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", background: selected ? "var(--em-bg)" : "var(--panel)", border: selected ? "1px solid var(--em-bd)" : "1px solid transparent", borderRadius: 8, cursor: "pointer", textAlign: "left", fontSize: 13, color: "var(--fg)" }}
+                        >
+                          {selected && <CheckIcon size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />}
+                          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <input
+                    value={sheetsId}
+                    onChange={(e) => handleSheetsIdInput(e.target.value)}
+                    placeholder="Cole o link da planilha ou só o ID"
+                    style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 8 }}
+                  />
+                  {sheetsId && (
+                    <button
+                      onClick={() => handleFetchTabs(sheetsId)}
+                      disabled={sheetsTabsLoading}
+                      style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: sheetsTabsLoading ? "wait" : "pointer", padding: 0, marginBottom: 10 }}
+                    >
+                      {sheetsTabsLoading ? "Buscando abas..." : "Ver abas desta planilha"}
+                    </button>
+                  )}
+                </>
+              )}
+
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 16 }}>
                 Lembre de compartilhar a planilha com o e-mail da service account acima (permissão de Editor).
               </div>
 
               <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Nome da aba</label>
+
+              {sheetsTabsError && (
+                <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 10 }}>
+                  {sheetsTabsError}
+                </div>
+              )}
+
+              {sheetsTabs.length > 1 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                  {sheetsTabs.map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setSheetsName(tab)}
+                      style={{ height: 28, padding: "0 10px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", background: sheetsName === tab ? "var(--accent)" : "var(--panel)", color: sheetsName === tab ? "#fff" : "var(--fg2)", border: "none" }}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <input
                 value={sheetsName}
                 onChange={(e) => setSheetsName(e.target.value)}

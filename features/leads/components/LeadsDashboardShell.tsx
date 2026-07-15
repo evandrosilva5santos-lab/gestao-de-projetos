@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { agencyOsThemeVars } from "@/lib/themes/agency-os";
 import {
   LogoIcon, MotorIcon, CentralIcon, DashboardIcon,
@@ -12,6 +13,10 @@ import { ClientsListScreen } from "./ClientsListScreen";
 import { ClientWorkspaceShell } from "./ClientWorkspaceShell";
 import { ComingSoonPanel } from "./ComingSoonPanel";
 import { IntegrationHubTab } from "@/features/integration-hub/components/IntegrationHubTab";
+import { LogsTab } from "./LogsTab";
+import { RoutingRulesTab } from "./RoutingRulesTab";
+import { ConfigTab } from "./ConfigTab";
+import { getWorkspaceById } from "../actions";
 
 // Porte pixel-exato de "Agency OS.dc.html" (protótipo de design do usuário),
 // adaptado pra navegação CLIENT-CENTRIC (ver docs/PLANO-REORGANIZACAO-CLIENT-CENTRIC.md):
@@ -53,28 +58,72 @@ const COMING_SOON: Partial<Record<ScreenKey, { title: string; description: strin
 };
 
 export function LeadsDashboardShell() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const workspaceId = searchParams.get("workspace");
+
   const [screen, setScreen] = useState<ScreenKey>("clientes");
   const [dark, setDark] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedWorkspace, setSelectedWorkspace] = useState<{ id: string; name: string } | null>(null);
+  // Só o NOME fica em estado local — o id de verdade mora na URL (?workspace=id),
+  // que é o que sobrevive a navegar pra outra tela e voltar, refresh e link
+  // compartilhado. Ver memória "fix_workspace_context_persistence".
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
+
+  // Se a página carrega direto com ?workspace=id (refresh, link colado), o nome
+  // não vem na URL — busca uma vez. Também cobre o caso do id mudar sem passar
+  // por handleSelectWorkspace (ex.: back/forward do navegador).
+  useEffect(() => {
+    if (!workspaceId) {
+      setWorkspaceName(null);
+      return;
+    }
+    let cancelled = false;
+    getWorkspaceById(workspaceId).then((res) => {
+      if (!cancelled && res.success) setWorkspaceName(res.workspace.name);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  const setWorkspaceParam = (id: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id) params.set("workspace", id);
+    else params.delete("workspace");
+    const qs = params.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+
+  const handleSelectWorkspace = (id: string, name: string) => {
+    setWorkspaceName(name); // evita o "Carregando..." — o clique já sabe o nome
+    setWorkspaceParam(id);
+  };
 
   const vars = agencyOsThemeVars(dark);
 
   let content: React.ReactNode;
   if (screen === "clientes") {
-    content = selectedWorkspace ? (
+    content = workspaceId ? (
       <ClientWorkspaceShell
-        workspaceId={selectedWorkspace.id}
-        workspaceName={selectedWorkspace.name}
-        onBack={() => setSelectedWorkspace(null)}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName ?? "Carregando..."}
+        onBack={() => setWorkspaceParam(null)}
       />
     ) : (
-      <ClientsListScreen onSelect={(id, name) => setSelectedWorkspace({ id, name })} />
+      <ClientsListScreen onSelect={handleSelectWorkspace} />
     );
   } else if (screen === "dashboard") {
     content = <OverviewTab />;
   } else if (screen === "central") {
     content = <IntegrationHubTab />;
+  } else if (screen === "regras") {
+    content = <RoutingRulesTab workspaceId={workspaceId || undefined} />;
+  } else if (screen === "logs") {
+    content = <LogsTab workspaceId={workspaceId || undefined} />;
+  } else if (screen === "config") {
+    content = <ConfigTab workspaceId={workspaceId || undefined} />;
   } else {
     content = COMING_SOON[screen] && <ComingSoonPanel {...COMING_SOON[screen]!} />;
   }
@@ -136,7 +185,8 @@ export function LeadsDashboardShell() {
                     onClick={() => {
                       setScreen(key);
                       setSidebarOpen(false);
-                      if (key === "clientes") setSelectedWorkspace(null);
+                      // Clicar em "Clientes" NÃO reseta mais o cliente ativo — só o
+                      // botão "← Clientes" dentro do shell (onBack) faz isso, de propósito.
                     }}
                     style={{
                       width: "100%",

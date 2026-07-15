@@ -29,8 +29,8 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
     origins: [] as string[],
     statuses: [] as string[],
     sellerId: undefined as string | undefined,
-    dateFrom: null as string | null,
-    dateTo: null as string | null,
+    dateFrom: undefined as string | undefined,
+    dateTo: undefined as string | undefined,
   });
   const [availableOrigins, setAvailableOrigins] = useState<string[]>([]);
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
@@ -46,7 +46,7 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
     let mounted = true;
     async function loadFiltered() {
       setLoading(true);
-      const res = await getLeadsWithFilters(workspaceId, filters);
+      const res = await getLeadsWithFilters(workspaceId as string, filters);
       if (mounted && res.success) {
         setFilteredLeads(res.leads);
         setAvailableOrigins(res.availableOrigins);
@@ -232,7 +232,7 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
                 <input
                   type="date"
                   value={filters.dateFrom || ""}
-                  onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value || null })}
+                  onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value || undefined })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-md bg-white text-sm"
                 />
               </div>
@@ -243,7 +243,7 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
                 <input
                   type="date"
                   value={filters.dateTo || ""}
-                  onChange={(e) => setFilters({ ...filters, dateTo: e.target.value || null })}
+                  onChange={(e) => setFilters({ ...filters, dateTo: e.target.value || undefined })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-md bg-white text-sm"
                 />
               </div>
@@ -256,8 +256,8 @@ export function LogsTab({ workspaceId }: { workspaceId?: string }) {
                   origins: [],
                   statuses: [],
                   sellerId: undefined,
-                  dateFrom: null,
-                  dateTo: null,
+                  dateFrom: undefined,
+                  dateTo: undefined,
                 })
               }
               className="text-sm text-slate-600 hover:text-slate-900 underline flex items-center gap-1"

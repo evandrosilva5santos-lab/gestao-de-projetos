@@ -47,6 +47,86 @@ function sheetsClient(clientEmail: string, privateKey: string) {
   return google.sheets({ version: "v4", auth: auth as unknown as InstanceType<typeof google.auth.OAuth2> });
 }
 
+/** Escopo separado (só metadados do Drive) — usado apenas para listar/buscar planilhas por nome. */
+function driveClient(clientEmail: string, privateKey: string) {
+  const formattedPrivateKey = privateKey.replace(/\\n/g, "\n");
+  const auth = new JWT({
+    email: clientEmail,
+    key: formattedPrivateKey,
+    scopes: ["https://www.googleapis.com/auth/drive.metadata.readonly"],
+  });
+  return google.drive({ version: "v3", auth: auth as unknown as InstanceType<typeof google.auth.OAuth2> });
+}
+
+export interface SpreadsheetOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Lista as planilhas que ESTA service account enxerga (só as que foram
+ * compartilhadas com o client_email dela — nunca "todo o Drive de alguém").
+ * `search` filtra por nome; vazio lista as mais recentes.
+ */
+export async function listAccessibleSpreadsheets(
+  clientEmail: string,
+  privateKey: string,
+  search?: string
+): Promise<{ success: true; spreadsheets: SpreadsheetOption[] } | { success: false; error: string }> {
+  try {
+    if (!clientEmail || !privateKey) {
+      return { success: false, error: "Cole o JSON da Service Account primeiro." };
+    }
+
+    const drive = driveClient(clientEmail, privateKey);
+    const escaped = (search || "").trim().replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const nameFilter = escaped ? ` and name contains '${escaped}'` : "";
+
+    const res = await drive.files.list({
+      q: `mimeType='application/vnd.google-apps.spreadsheet' and trashed=false${nameFilter}`,
+      fields: "files(id,name)",
+      pageSize: 25,
+      orderBy: "modifiedTime desc",
+    });
+
+    const spreadsheets: SpreadsheetOption[] = (res.data.files || [])
+      .filter((f): f is { id: string; name: string } => !!f.id && !!f.name)
+      .map((f) => ({ id: f.id, name: f.name }));
+
+    return { success: true, spreadsheets };
+  } catch (err) {
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? `${err.message} — confira se a API do Google Drive está habilitada no mesmo projeto GCP da Service Account.`
+          : "Falha ao buscar planilhas.",
+    };
+  }
+}
+
+/** Lista as abas (tabs) de uma planilha já escolhida, para seleção por clique em vez de digitação. */
+export async function listSheetTabs(
+  clientEmail: string,
+  privateKey: string,
+  spreadsheetId: string
+): Promise<{ success: true; tabs: string[] } | { success: false; error: string }> {
+  try {
+    const sheets = sheetsClient(clientEmail, privateKey);
+    const res = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets(properties(title))" });
+    const tabs = (res.data.sheets || [])
+      .map((s) => s.properties?.title)
+      .filter((t): t is string => !!t);
+
+    if (tabs.length === 0) {
+      return { success: false, error: "Nenhuma aba encontrada nesta planilha." };
+    }
+    return { success: true, tabs };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Falha ao listar abas da planilha." };
+  }
+}
+
 /**
  * Lê a linha de cabeçalho (primeira linha) de uma planilha/aba — usado pela UI
  * para descobrir as colunas reais e deixar o usuário mapear campo a campo.

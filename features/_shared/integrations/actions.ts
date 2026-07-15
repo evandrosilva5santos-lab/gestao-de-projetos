@@ -3,6 +3,8 @@
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 import { fetchMetaPages, fetchMetaForms, fetchMetaAdAccounts } from "@/lib/leads/providers/meta";
 import type { MetaPage } from "@/lib/leads/providers/meta";
+import { listAccessibleSpreadsheets, listSheetTabs } from "@/lib/leads/integrations/sheets";
+import { fetchKommoUsers } from "@/lib/leads/integrations/kommo";
 import * as crypto from "crypto";
 
 export async function listWorkspaces() {
@@ -511,22 +513,9 @@ export async function addSellerToConnection(data: {
  * havia 1 cliente só. Com múltiplos clientes, use getDestinationsForWorkspace.
  */
 export async function getDestinations() {
-  // Try to find the default workspace
-  const { data: workspaces, error: wsError } = await supabase
-    .from("core_workspaces")
-    .select("id")
-    .limit(1);
-
-  if (wsError || !workspaces || workspaces.length === 0) {
-    return { success: false, error: "No workspace found" };
-  }
-
-  const workspaceId = workspaces[0].id;
-
   const { data: destinations, error } = await supabase
     .from("gestao_leads_destinations")
-    .select("*")
-    .eq("workspace_id", workspaceId);
+    .select("*, core_workspaces(name)");
 
   if (error) {
     return { success: false, error: error.message };
@@ -608,6 +597,42 @@ export async function saveKommoDestination(data: {
 
     if (error) {
       return { success: false, error: error.message };
+    }
+
+    // Sincroniza usuários do Kommo como Vendedores (Fila da Vez)
+    const usersRes = await fetchKommoUsers(data.subdomain, data.token);
+    if (usersRes.success && usersRes.users) {
+      const sellersToUpsert = usersRes.users.map((u) => ({
+        workspace_id: workspaceId,
+        crm_user_id: String(u.id),
+        name: u.name,
+        email: u.email || null,
+        phone: u.phone || null,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      }));
+
+      for (const seller of sellersToUpsert) {
+        // Verifica se já existe para este workspace_id e crm_user_id
+        const { data: existing } = await supabase
+          .from("gestao_leads_sellers")
+          .select("id")
+          .eq("workspace_id", workspaceId)
+          .eq("crm_user_id", seller.crm_user_id)
+          .single();
+
+        if (!existing) {
+          await supabase.from("gestao_leads_sellers").insert({
+            ...seller,
+            created_at: new Date().toISOString(),
+          });
+        } else {
+          await supabase
+            .from("gestao_leads_sellers")
+            .update(seller)
+            .eq("id", existing.id);
+        }
+      }
     }
 
     return { success: true };
@@ -776,4 +801,17 @@ export async function saveMetaAdAccounts(data: {
   } catch (err) {
     return { success: false as const, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Busca planilhas que a Service Account enxerga (só as compartilhadas com ela).
+ * Credenciais chegam do JSON recém-colado no modal — nada aqui foi salvo ainda.
+ */
+export async function searchGoogleSpreadsheets(data: { clientEmail: string; privateKey: string; search?: string }) {
+  return listAccessibleSpreadsheets(data.clientEmail, data.privateKey, data.search);
+}
+
+/** Abas de uma planilha já escolhida — usada para seleção por clique em vez de digitação. */
+export async function listGoogleSheetTabs(data: { clientEmail: string; privateKey: string; spreadsheetId: string }) {
+  return listSheetTabs(data.clientEmail, data.privateKey, data.spreadsheetId);
 }
