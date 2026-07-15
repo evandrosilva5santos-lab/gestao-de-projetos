@@ -16,6 +16,10 @@ export interface KommoConfig {
     startTime?: number;
     budget?: number;
     salaryRange?: number;
+    /** Campo custom (texto) do NEGÓCIO para guardar o Facebook Lead ID (leadgenId).
+     * Varia por conta Kommo — sem default. Quando presente, torna o upsert por
+     * leadgenId confiável mesmo em clientes SEM a integração nativa Facebook. */
+    leadgenId?: number;
   };
 }
 
@@ -43,6 +47,12 @@ interface KommoContactsResponse {
 
 interface KommoLeadsResponse {
   _embedded?: { leads?: { id: number }[] };
+}
+
+interface KommoLeadSearchItem {
+  id: number;
+  name?: string;
+  custom_fields_values?: { values?: { value?: string | number }[] }[];
 }
 
 interface KommoCustomFieldValue {
@@ -101,6 +111,7 @@ export async function sendLeadToKommo(
     const startTimeFieldId = f.startTime || 1120376;
     const budgetFieldId = f.budget || 1120368;
     const salaryRangeFieldId = f.salaryRange || 1120370;
+    const leadgenIdFieldId = f.leadgenId; // opcional — sem default (varia por conta)
 
     // 1. Procurar contato por telefone (últimos 8 dígitos para evitar conflitos de DDD)
     let contactId: number | null = null;
@@ -263,6 +274,16 @@ export async function sendLeadToKommo(
       });
     }
 
+    // Grava o Facebook Lead ID (leadgenId) num campo custom buscável do negócio —
+    // só quando a conta tem esse campo configurado. Isso permite reconciliar por
+    // leadgenId mesmo em clientes SEM a integração nativa Facebook.
+    if (leadgenIdFieldId && lead.leadgenId) {
+      customFields.push({
+        field_id: leadgenIdFieldId,
+        values: [{ value: lead.leadgenId }]
+      });
+    }
+
     const leadBody: KommoLeadBody = {
       name: `Lead: ${lead.name}`,
       pipeline_id: config.pipelineId || 13924251,
@@ -312,12 +333,20 @@ export async function sendLeadToKommo(
     let existingDealId: number | null = null;
     if (lead.leadgenId) {
       try {
-        const q = encodeURIComponent(`Facebook №${lead.leadgenId}`);
-        const dealSearchRes = await fetch(`${baseUrl}/api/v4/leads?query=${q}`, { method: "GET", headers });
+        // Busca pelo número puro do leadgenId — casa tanto o deal da integração NATIVA
+        // (nome "Facebook №{leadgenId}") quanto o campo custom (clientes SEM nativa).
+        const dealSearchRes = await fetch(`${baseUrl}/api/v4/leads?query=${encodeURIComponent(String(lead.leadgenId))}`, { method: "GET", headers });
         if (dealSearchRes.ok) {
-          const dealSearchData = (await dealSearchRes.json()) as { _embedded?: { leads?: { id: number; name?: string }[] } };
-          const re = new RegExp(`Facebook\\s*№\\s*${lead.leadgenId}(\\D|$)`, "i");
-          existingDealId = dealSearchData?._embedded?.leads?.find((d) => re.test(d.name || ""))?.id ?? null;
+          const dealSearchData = (await dealSearchRes.json()) as { _embedded?: { leads?: KommoLeadSearchItem[] } };
+          const wanted = String(lead.leadgenId).replace(/\D/g, "");
+          const reName = new RegExp(`Facebook\\s*№\\s*${lead.leadgenId}(\\D|$)`, "i");
+          const match = (dealSearchData?._embedded?.leads || []).find((d) =>
+            reName.test(d.name || "") ||
+            (d.custom_fields_values || []).some((cf) =>
+              (cf.values || []).some((v) => String(v.value ?? "").replace(/\D/g, "") === wanted && wanted.length > 0)
+            )
+          );
+          existingDealId = match?.id ?? null;
         }
       } catch (err) {
         console.error("Aviso: falha ao buscar deal por leadgenId no Kommo:", err instanceof Error ? err.message : err);

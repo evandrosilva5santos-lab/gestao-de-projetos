@@ -227,6 +227,7 @@ export const processNewLead = inngest.createFunction(
             pipelineId: config.pipelineId ? Number(config.pipelineId) : undefined,
             statusId: config.statusId ? Number(config.statusId) : undefined,
             tagId: config.tagId ? Number(config.tagId) : undefined,
+            fields: config.fields,
           },
           { ...treatedData, leadgenId: treatedData.leadgenId, reentryCount },
           sellerDetails?.crm_user_id || undefined
