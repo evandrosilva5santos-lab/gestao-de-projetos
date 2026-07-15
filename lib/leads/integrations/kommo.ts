@@ -147,6 +147,11 @@ export async function sendLeadToKommo(
     }
 
     // 2. Se o contato não existe, cria um novo contato
+    //
+    // REGRA (Contato vs Oportunidade): o CONTATO é único por pessoa (dedup por
+    // telefone/e-mail acima) e NUNCA é duplicado. Mas um contato existente PODE
+    // ganhar uma nova OPORTUNIDADE (negócio) — isso é tratado no passo 3 (upsert
+    // por leadgenId). Por isso NÃO retornamos cedo aqui só porque o contato existe.
     if (!contactId) {
       const nameParts = lead.name.trim().split(" ");
       const firstName = nameParts[0] || "Lead";
@@ -297,23 +302,60 @@ export async function sendLeadToKommo(
 
     leadBody._embedded.tags = tags;
 
-    const createLeadRes = await fetch(`${baseUrl}/api/v4/leads`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify([leadBody]),
-    });
-
-    if (!createLeadRes.ok) {
-      const errorText = await createLeadRes.text();
-      return { success: false, error: `Falha ao criar Deal no Kommo: ${errorText}` };
+    // 3.5. UPSERT da OPORTUNIDADE por evento (leadgenId).
+    // A integração NATIVA Facebook→Kommo (quando ativa) já cria o negócio com nome
+    // "Facebook №{leadgenId}". Para NÃO duplicar a MESMA oportunidade, procuramos esse
+    // negócio pelo leadgenId e, se existir, ATUALIZAMOS (PATCH) com o nosso fluxo correto
+    // (nome padrão, campos, estágio, vendedor, tags). Se não existir, CRIAMOS um negócio
+    // novo. Um contato pode ter vários negócios (eventos diferentes) — cada leadgenId é um.
+    // Confirmado (14/jul): número do deal nativo == leadgenId (29/29 casaram na Karol).
+    let existingDealId: number | null = null;
+    if (lead.leadgenId) {
+      try {
+        const q = encodeURIComponent(`Facebook №${lead.leadgenId}`);
+        const dealSearchRes = await fetch(`${baseUrl}/api/v4/leads?query=${q}`, { method: "GET", headers });
+        if (dealSearchRes.ok) {
+          const dealSearchData = (await dealSearchRes.json()) as { _embedded?: { leads?: { id: number; name?: string }[] } };
+          const re = new RegExp(`Facebook\\s*№\\s*${lead.leadgenId}(\\D|$)`, "i");
+          existingDealId = dealSearchData?._embedded?.leads?.find((d) => re.test(d.name || ""))?.id ?? null;
+        }
+      } catch (err) {
+        console.error("Aviso: falha ao buscar deal por leadgenId no Kommo:", err instanceof Error ? err.message : err);
+      }
     }
 
-    const createLeadData = (await createLeadRes.json()) as KommoLeadsResponse;
-    const kommoLeadId = createLeadData?._embedded?.leads?.[0]?.id;
+    let kommoLeadId: number | undefined;
+    if (existingDealId) {
+      // ATUALIZA o negócio que já existe (nativa ou reenvio) — não duplica.
+      const updateLeadRes = await fetch(`${baseUrl}/api/v4/leads`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify([{ id: existingDealId, ...leadBody }]),
+      });
+      if (!updateLeadRes.ok) {
+        const errorText = await updateLeadRes.text();
+        return { success: false, error: `Falha ao atualizar Deal no Kommo: ${errorText}` };
+      }
+      const updateLeadData = (await updateLeadRes.json()) as KommoLeadsResponse;
+      kommoLeadId = updateLeadData?._embedded?.leads?.[0]?.id ?? existingDealId;
+    } else {
+      // CRIA um negócio novo (nova oportunidade).
+      const createLeadRes = await fetch(`${baseUrl}/api/v4/leads`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify([leadBody]),
+      });
+      if (!createLeadRes.ok) {
+        const errorText = await createLeadRes.text();
+        return { success: false, error: `Falha ao criar Deal no Kommo: ${errorText}` };
+      }
+      const createLeadData = (await createLeadRes.json()) as KommoLeadsResponse;
+      kommoLeadId = createLeadData?._embedded?.leads?.[0]?.id;
+    }
 
-    // 4. Rastreabilidade: anexa o ID original do lead do Meta como nota no deal.
+    // 4. Rastreabilidade: anexa o ID original do lead do Meta como nota no deal (só ao criar).
     // Best-effort — não deve derrubar o sucesso do envio se a nota falhar.
-    if (kommoLeadId && lead.leadgenId) {
+    if (kommoLeadId && lead.leadgenId && !existingDealId) {
       try {
         await fetch(`${baseUrl}/api/v4/leads/${kommoLeadId}/notes`, {
           method: "POST",
@@ -333,6 +375,55 @@ export async function sendLeadToKommo(
     return { success: true, leadId: kommoLeadId };
   } catch (err) {
     console.error("Erro inesperado na integração do Kommo:", err);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface KommoUser {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+}
+
+interface KommoUsersResponse {
+  _embedded?: {
+    users?: KommoUser[];
+  };
+}
+
+/**
+ * Busca a lista de usuários responsáveis/representantes na conta Kommo.
+ */
+export async function fetchKommoUsers(subdomain: string, token: string): Promise<{ success: boolean; users?: KommoUser[]; error?: string }> {
+  try {
+    if (!subdomain || !token) {
+      return { success: false, error: "Subdomínio ou Token não fornecidos" };
+    }
+
+    const baseUrl = `https://${subdomain.toLowerCase().trim()}.kommo.com`;
+    
+    const headers = {
+      Authorization: `Bearer ${token.trim()}`,
+      "Content-Type": "application/json",
+    };
+
+    const response = await fetch(`${baseUrl}/api/v4/users`, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { success: false, error: `Falha ao buscar usuários no Kommo: ${errorText}` };
+    }
+
+    const data = (await response.json()) as KommoUsersResponse;
+    const users = data._embedded?.users || [];
+
+    return { success: true, users };
+  } catch (err) {
+    console.error("Erro inesperado ao buscar usuários no Kommo:", err);
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
