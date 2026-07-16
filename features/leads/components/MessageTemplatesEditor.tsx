@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Shuffle, Save, MessageCircle, Users } from "lucide-react";
 import { getMessageTemplates, saveMessageTemplates } from "../actions";
+import { FieldMappingReview } from "./FieldMappingReview";
 import {
   renderTemplate,
   buildLeadContext,
@@ -207,6 +208,8 @@ export function MessageTemplatesEditor({ workspaceId }: { workspaceId: string })
           Mostrando os templates padrão. Ao salvar pela primeira vez eles passam a valer para este cliente.
         </div>
       )}
+
+      <FieldMappingReview workspaceId={workspaceId} />
 
       <TemplateEditor
         title="Mensagem para o cliente"

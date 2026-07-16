@@ -4,6 +4,13 @@ import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 import type { SellerAvailability } from "@/lib/leads/availability";
 import type { QualificationRule } from "@/lib/leads/qualification";
 import { DEFAULT_TEMPLATES, type MessageTemplates } from "@/lib/leads/templates";
+import {
+  CONCEPTS,
+  CONCEPT_TO_TEMPLATE_VAR,
+  IGNORED_KEYS,
+  resolveConcept,
+  type FieldOverrides,
+} from "@/lib/leads/schema-registry";
 import { fetchKommoUsers } from "@/lib/leads/integrations/kommo";
 import { fetchMetaFormLeads } from "@/lib/leads/providers/meta";
 
@@ -31,6 +38,96 @@ export async function saveMessageTemplates(workspaceId: string, templates: Messa
     .from("gestao_leads_workspace_rules")
     .upsert(
       { workspace_id: workspaceId, message_templates: templates, updated_at: new Date().toISOString() },
+      { onConflict: "workspace_id" }
+    );
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const };
+}
+
+/**
+ * Revisão de mapeamento: descobre os campos que chegam no formulário (raw_data
+ * dos leads) e mostra pra qual CONCEITO / variável de template cada um casa.
+ * Aponta o que não casou sozinho (precisa de ajuste manual). Read-only.
+ */
+export async function getTemplateFieldMapping(workspaceId: string) {
+  const { data: leads } = await supabase
+    .from("gestao_leads")
+    .select("raw_data")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  // Overrides salvos (coluna pode não existir ainda → ignora).
+  let overrides: FieldOverrides = {};
+  const { data: rules, error: rulesErr } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .select("field_overrides")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (!rulesErr && rules?.field_overrides) overrides = rules.field_overrides as FieldOverrides;
+
+  // Junta os rótulos distintos que aparecem no formulário, com um exemplo de valor.
+  const sampleByLabel = new Map<string, string>();
+  for (const l of leads || []) {
+    const rd = (l.raw_data || {}) as Record<string, unknown>;
+    for (const [key, val] of Object.entries(rd)) {
+      if (IGNORED_KEYS.has(key)) continue;
+      if (!sampleByLabel.has(key)) sampleByLabel.set(key, String(val ?? "").slice(0, 60));
+      else if (!sampleByLabel.get(key) && val) sampleByLabel.set(key, String(val).slice(0, 60));
+    }
+  }
+
+  const fields = [...sampleByLabel.entries()].map(([label, sample]) => {
+    const concept = resolveConcept(label, overrides);
+    const templateVar = concept ? CONCEPT_TO_TEMPLATE_VAR[concept.key] ?? null : null;
+    const isOverridden = Object.keys(overrides).some((k) => k === label);
+    return {
+      label,
+      sample,
+      conceptKey: concept?.key ?? null,
+      conceptLabel: concept?.label ?? null,
+      templateVar,
+      status: !concept ? ("nao_mapeado" as const) : templateVar ? ("mapeado" as const) : ("sem_variavel" as const),
+      overridden: isOverridden,
+    };
+  });
+
+  // Variáveis de template que NÃO têm nenhum campo alimentando (renderizam vazias).
+  const varsWithField = new Set(fields.filter((f) => f.templateVar).map((f) => f.templateVar));
+  const missingVars = Object.values(CONCEPT_TO_TEMPLATE_VAR).filter((v) => !varsWithField.has(v));
+
+  // Opções pro dropdown de override (conceitos que viram variável de mensagem).
+  const conceptOptions = CONCEPTS.filter((c) => CONCEPT_TO_TEMPLATE_VAR[c.key]).map((c) => ({
+    key: c.key,
+    label: c.label,
+    templateVar: CONCEPT_TO_TEMPLATE_VAR[c.key],
+  }));
+
+  return {
+    success: true as const,
+    fields,
+    missingVars,
+    conceptOptions,
+    leadsAnalisados: (leads || []).length,
+  };
+}
+
+/** Define/remove o mapeamento manual de um campo → conceito. conceptKey null = remove. */
+export async function saveFieldOverride(workspaceId: string, fieldLabel: string, conceptKey: string | null) {
+  const { data: rules } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .select("field_overrides")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  const overrides: FieldOverrides = (rules?.field_overrides as FieldOverrides) || {};
+  if (conceptKey) overrides[fieldLabel] = conceptKey;
+  else delete overrides[fieldLabel];
+
+  const { error } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .upsert(
+      { workspace_id: workspaceId, field_overrides: overrides, updated_at: new Date().toISOString() },
       { onConflict: "workspace_id" }
     );
   if (error) return { success: false as const, error: error.message };
