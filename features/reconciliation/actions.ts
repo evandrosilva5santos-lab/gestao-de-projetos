@@ -24,16 +24,30 @@ export type WorkspaceOption = { id: string; name: string; slug: string | null };
 
 export type InKommo = "yes" | "no" | "error";
 
+/** completo = está no Kommo (negócio próprio) + na CRM + msg no grupo. parado = furou
+ * em algum. erro = nosso motor tentou e falhou (status error no banco). */
+export type ReconStatus = "completo" | "parado" | "erro";
+
 export type ReconLead = {
+  leadgenId: string | null;
   name: string;
   phone: string;
   email: string;
-  inDb: boolean;
-  inKommo: InKommo;
-  /** true = é contato PRINCIPAL de algum negócio; false = só contato (ex.: grudado no deal de outro); null = não avaliado. */
-  kommoOwnDeal: boolean | null;
-  inSheetCRM: boolean;
   createdAt: string | null;
+  status: ReconStatus;
+  inBancoDados: boolean; // veio da aba mestre do Facebook
+  inDb: boolean;
+  inSheetCRM: boolean;
+  inKommo: InKommo;
+  /** true = é contato PRINCIPAL de algum negócio; false = só contato; null = não avaliado. */
+  kommoOwnDeal: boolean | null;
+  whatsSentByEngine: boolean; // nossos audit logs confirmam o envio da mensagem
+  // Marcações manuais do cliente na aba "Banco de Dados":
+  markedSheet: boolean; // coluna "Atualizar"
+  markedWhats: boolean; // coluna "Mandou mensagem no Whats"
+  markedKommo: boolean; // coluna "FOI PRO KOMMO?"
+  /** Onde a planilha do cliente diz "ok" mas a verdade real diverge. */
+  divergences: string[];
 };
 
 export type ReconResult =
@@ -43,11 +57,16 @@ export type ReconResult =
       leads: ReconLead[];
       summary: {
         total: number;
+        completos: number;
+        parados: number;
+        erros: number;
         faltando_no_kommo: number; // sem contato OU sem negócio próprio
         faltando_na_planilha: number;
-        so_contato_sem_negocio: number; // caso "Elizane": contato existe mas sem deal próprio
+        so_contato_sem_negocio: number;
+        divergencias: number; // planilha marca ok mas a verdade diz não
         kommo_error: boolean;
         sheet_error: boolean;
+        banco_dados_error: boolean;
       };
     }
   | { success: false; error: string };
@@ -214,6 +233,75 @@ async function readSheetCRM(config: {
 }
 
 // ---------------------------------------------------------------------------
+// Planilha (read-only): lê a aba "Banco de Dados" — onde o Facebook despeja os
+// leads NATIVAMENTE. É a lista-mestre de tudo que o formulário capturou.
+// Casa colunas por nome de cabeçalho (robusto à posição): ID (=leadgen_id),
+// nome_completo, telefone, email, e as 3 de controle do cliente.
+// ---------------------------------------------------------------------------
+type BancoRow = {
+  leadgenId: string;
+  name: string;
+  phone: string;
+  email: string;
+  markedSheet: boolean; // "Atualizar"
+  markedWhats: boolean; // "Mandou mensagem no Whats"
+  markedKommo: boolean; // "FOI PRO KOMMO?"
+};
+
+const isOk = (v: string | undefined) => {
+  const s = (v || "").trim().toLowerCase();
+  return s === "ok" || s === "sim" || s === "x" || s === "✓" || s === "true";
+};
+
+async function readSheetBancoDados(config: {
+  clientEmail: string;
+  privateKey: string;
+  spreadsheetId: string;
+}): Promise<BancoRow[]> {
+  const auth = new JWT({
+    email: config.clientEmail,
+    key: (config.privateKey || "").replace(/\\n/g, "\n"),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+  const sheets = google.sheets({ version: "v4", auth: auth as unknown as InstanceType<typeof google.auth.OAuth2> });
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: "Banco de Dados",
+    valueRenderOption: "FORMATTED_VALUE",
+  });
+  const values = (res.data.values || []) as string[][];
+  const headers = (values[0] || []).map((h) => (h || "").trim());
+
+  const find = (re: RegExp) => headers.findIndex((h) => re.test(h));
+  const idId = find(/^id$/i);
+  const idName = find(/nome/i);
+  const idPhone = find(/telefone|phone|whats/i);
+  const idEmail = find(/e-?mail/i);
+  const idSheet = find(/atualiza/i);
+  const idWhats = find(/mensagem|whats/i);
+  const idKommo = find(/kommo/i);
+
+  const rows: BancoRow[] = [];
+  for (const row of values.slice(1)) {
+    const phone = idPhone >= 0 ? row[idPhone] || "" : "";
+    const email = idEmail >= 0 ? row[idEmail] || "" : "";
+    const name = idName >= 0 ? row[idName] || "" : "";
+    if (!phone && !email && !name) continue; // linha vazia
+    rows.push({
+      leadgenId: idId >= 0 ? (row[idId] || "").trim() : "",
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email.trim().toLowerCase(),
+      markedSheet: idSheet >= 0 ? isOk(row[idSheet]) : false,
+      markedWhats: idWhats >= 0 ? isOk(row[idWhats]) : false,
+      markedKommo: idKommo >= 0 ? isOk(row[idKommo]) : false,
+    });
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
 // Ação principal.
 // ---------------------------------------------------------------------------
 export async function reconcileWorkspace(workspaceId: string): Promise<ReconResult> {
@@ -247,49 +335,120 @@ export async function reconcileWorkspace(workspaceId: string): Promise<ReconResu
     | { clientEmail?: string; privateKey?: string; spreadsheetId?: string }
     | undefined;
 
-  // 3. Planilha CRM (read-only). Falha aqui não derruba o scan.
+  // 3. Planilha: aba "CRM" (destino formatado) + aba "Banco de Dados" (despejo nativo
+  //    do Facebook = lista-mestre). Falha em qualquer uma não derruba o scan.
+  const sheetFull =
+    sheetCfg?.clientEmail && sheetCfg?.privateKey && sheetCfg?.spreadsheetId
+      ? (sheetCfg as { clientEmail: string; privateKey: string; spreadsheetId: string })
+      : null;
+
   let sheetPhones = new Set<string>();
   let sheetEmails = new Set<string>();
   let sheetError = false;
-  if (sheetCfg?.clientEmail && sheetCfg?.privateKey && sheetCfg?.spreadsheetId) {
+  let bancoRows: BancoRow[] = [];
+  let bancoError = false;
+  if (sheetFull) {
     try {
-      const r = await readSheetCRM(sheetCfg as { clientEmail: string; privateKey: string; spreadsheetId: string });
+      const r = await readSheetCRM(sheetFull);
       sheetPhones = r.phones;
       sheetEmails = r.emails;
     } catch {
       sheetError = true;
     }
+    try {
+      bancoRows = await readSheetBancoDados(sheetFull);
+    } catch {
+      bancoError = true;
+    }
   } else {
     sheetError = true;
+    bancoError = true;
   }
 
-  // 4. Universo = banco ∪ planilha CRM (dedup por chave de telefone; fallback e-mail/nome).
-  type Entry = { name: string; phone: string; email: string; inDb: boolean; inSheetCRM: boolean; createdAt: string | null; phoneKey: string };
+  // Bound de tempo: Kommo é consultado lead a lead (com sleeps). Foca nos mais
+  // recentes (fim da aba = mais novo) pra caber no limite do serverless.
+  const RECENT_LIMIT = 120;
+  bancoRows = bancoRows.slice(-RECENT_LIMIT).reverse();
+
+  // 4. WhatsApp: audit logs que confirmam o envio (só p/ leads que passaram pelo motor).
+  const whatsSentPhones = new Set<string>();
+  {
+    const { data: logs } = await supabaseAdmin
+      .from("gestao_leads_audit_logs")
+      .select("details")
+      .eq("workspace_id", workspaceId);
+    for (const log of logs || []) {
+      const d = (log.details || {}) as { whatsapp_delivered?: boolean; treated_data?: { phone?: string } };
+      if (d.whatsapp_delivered) {
+        const p = normalizePhone(d.treated_data?.phone);
+        if (p) whatsSentPhones.add(p);
+      }
+    }
+  }
+
+  // 5. Universo: "Banco de Dados" (mestre) ∪ banco. Dedup por telefone (fallback e-mail/nome).
+  type Entry = {
+    leadgenId: string | null; name: string; phone: string; email: string; phoneKey: string;
+    createdAt: string | null; inBancoDados: boolean; inDb: boolean; inSheetCRM: boolean; dbStatus: string | null;
+    markedSheet: boolean; markedWhats: boolean; markedKommo: boolean;
+  };
   const universe = new Map<string, Entry>();
   const keyFor = (phone: string, email: string, name: string) =>
     normalizePhone(phone) || (email || "").trim().toLowerCase() || (name || "").trim().toLowerCase();
 
-  for (const l of dbLeads || []) {
-    const phoneKey = normalizePhone(l.phone);
-    const k = keyFor(l.phone, l.email, l.name);
+  for (const b of bancoRows) {
+    const k = keyFor(b.phone, b.email, b.name);
     if (!k) continue;
     universe.set(k, {
-      name: l.name || "—",
-      phone: l.phone || "",
-      email: (l.email || "").trim(),
-      inDb: true,
+      leadgenId: b.leadgenId || null,
+      name: b.name || "—",
+      phone: b.phone,
+      email: b.email,
+      phoneKey: normalizePhone(b.phone),
+      createdAt: null,
+      inBancoDados: true,
+      inDb: false,
       inSheetCRM: false,
-      createdAt: l.created_at || null,
-      phoneKey,
+      dbStatus: null,
+      markedSheet: b.markedSheet,
+      markedWhats: b.markedWhats,
+      markedKommo: b.markedKommo,
     });
   }
-  // marca quem está na planilha (e adiciona os que só existem lá)
-  for (const key of sheetPhones) {
-    const existing = [...universe.values()].find((e) => e.phoneKey === key);
-    if (existing) existing.inSheetCRM = true;
+  for (const l of dbLeads || []) {
+    const k = keyFor(l.phone, l.email, l.name);
+    if (!k) continue;
+    const existing = universe.get(k);
+    if (existing) {
+      existing.inDb = true;
+      existing.dbStatus = l.status || null;
+      existing.createdAt = existing.createdAt || l.created_at || null;
+    } else {
+      universe.set(k, {
+        leadgenId: null,
+        name: l.name || "—",
+        phone: l.phone || "",
+        email: (l.email || "").trim(),
+        phoneKey: normalizePhone(l.phone),
+        createdAt: l.created_at || null,
+        inBancoDados: false,
+        inDb: true,
+        inSheetCRM: false,
+        dbStatus: l.status || null,
+        markedSheet: false,
+        markedWhats: false,
+        markedKommo: false,
+      });
+    }
+  }
+  // Marca quem está na aba CRM (por telefone OU e-mail).
+  for (const e of universe.values()) {
+    if ((e.phoneKey && sheetPhones.has(e.phoneKey)) || (e.email && sheetEmails.has(e.email.toLowerCase()))) {
+      e.inSheetCRM = true;
+    }
   }
 
-  // 5. Consulta Kommo (read-only) por lead do universo.
+  // 6. Kommo (ao vivo) + classificação por lead.
   const kommoOk = !!(kommoCfg?.subdomain && kommoCfg?.token);
   let kommoError = false;
   const baseUrl = kommoOk ? `https://${kommoCfg!.subdomain!.toLowerCase().trim()}.kommo.com` : "";
@@ -307,21 +466,49 @@ export async function reconcileWorkspace(workspaceId: string): Promise<ReconResu
       if (inKommo === "error") kommoError = true;
       await sleep(160);
     }
-    // inSheetCRM: também confere e-mail
-    const inSheetCRM = e.inSheetCRM || (!!e.email && sheetEmails.has(e.email.toLowerCase()));
+
+    const whatsSentByEngine = !!e.phoneKey && whatsSentPhones.has(e.phoneKey);
+    const kommoRealOk = inKommo === "yes" && ownDeal === true;
+    const whatsOk = whatsSentByEngine || e.markedWhats;
+
+    // Divergência = a planilha do cliente marca "ok" mas a verdade real diz não.
+    const divergences: string[] = [];
+    if (e.markedKommo && inKommo !== "error" && !kommoRealOk) {
+      divergences.push(
+        inKommo === "no"
+          ? "Planilha diz Kommo OK, mas não achei no Kommo"
+          : "Planilha diz Kommo OK, mas é só contato (sem negócio próprio)"
+      );
+    }
+    if (e.markedSheet && !e.inSheetCRM) {
+      divergences.push("Planilha diz Atualizado, mas não está na aba CRM");
+    }
+
+    let status: ReconStatus;
+    if (e.dbStatus === "error") status = "erro";
+    else if (kommoRealOk && e.inSheetCRM && whatsOk) status = "completo";
+    else status = "parado";
+
     leads.push({
+      leadgenId: e.leadgenId,
       name: e.name,
       phone: e.phone,
       email: e.email,
+      createdAt: e.createdAt,
+      status,
+      inBancoDados: e.inBancoDados,
       inDb: e.inDb,
+      inSheetCRM: e.inSheetCRM,
       inKommo,
       kommoOwnDeal: ownDeal,
-      inSheetCRM,
-      createdAt: e.createdAt,
+      whatsSentByEngine,
+      markedSheet: e.markedSheet,
+      markedWhats: e.markedWhats,
+      markedKommo: e.markedKommo,
+      divergences,
     });
   }
 
-  // 6. Resumo
   const faltando_no_kommo = leads.filter((l) => l.inKommo === "no" || (l.inKommo === "yes" && l.kommoOwnDeal === false)).length;
   const so_contato_sem_negocio = leads.filter((l) => l.inKommo === "yes" && l.kommoOwnDeal === false).length;
   const faltando_na_planilha = leads.filter((l) => !l.inSheetCRM).length;
@@ -332,11 +519,16 @@ export async function reconcileWorkspace(workspaceId: string): Promise<ReconResu
     leads,
     summary: {
       total: leads.length,
+      completos: leads.filter((l) => l.status === "completo").length,
+      parados: leads.filter((l) => l.status === "parado").length,
+      erros: leads.filter((l) => l.status === "erro").length,
       faltando_no_kommo,
       faltando_na_planilha,
       so_contato_sem_negocio,
+      divergencias: leads.filter((l) => l.divergences.length > 0).length,
       kommo_error: kommoError,
       sheet_error: sheetError,
+      banco_dados_error: bancoError,
     },
   };
 }
