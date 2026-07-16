@@ -4,7 +4,8 @@ import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 import { fetchMetaPages, fetchMetaForms, fetchMetaAdAccounts } from "@/lib/leads/providers/meta";
 import type { MetaPage } from "@/lib/leads/providers/meta";
 import { listAccessibleSpreadsheets, listSheetTabs } from "@/lib/leads/integrations/sheets";
-import { fetchKommoUsers, pingKommoAccount } from "@/lib/leads/integrations/kommo";
+import { fetchKommoUsers, pingKommoAccount, fetchKommoPipelines } from "@/lib/leads/integrations/kommo";
+import type { KommoPipeline } from "@/lib/leads/integrations/kommo";
 import { fetchSheetHeaders } from "@/lib/leads/integrations/sheets";
 import * as crypto from "crypto";
 
@@ -355,6 +356,19 @@ export async function testKommoConnection(destinationId: string) {
   const res = await pingKommoAccount(cfg.config.subdomain || "", cfg.config.token || "");
   if (!res.success) return { success: false as const, error: res.error || "Falha ao validar o Kommo." };
   return { success: true as const, message: `Conectado à conta "${res.accountName}".` };
+}
+
+/**
+ * Busca os pipelines/etapas reais da conta Kommo a partir de subdomínio+token
+ * já digitados no wizard (ainda não salvos) — troca "Pipeline ID"/"Status ID"
+ * de campo de texto por seleção por nome. Ver docs/AUDITORIA-BOTOES-FICTICIOS.md item 3.
+ */
+export async function listKommoPipelines(subdomain: string, token: string): Promise<{ success: true; pipelines: KommoPipeline[] } | { success: false; error: string }> {
+  const res = await fetchKommoPipelines(subdomain, token);
+  if (!res.success || !res.pipelines) {
+    return { success: false, error: res.error || "Falha ao buscar pipelines." };
+  }
+  return { success: true, pipelines: res.pipelines };
 }
 
 /** Botão "Testar" — Google Sheets: lê o cabeçalho real da aba configurada. */
@@ -741,9 +755,97 @@ export async function saveKommoDestination(data: {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Google Sheets — Service Account como CONEXÃO catalogada (nível agência).
+ * A credencial (client_email + private_key) é cadastrada UMA vez; adicionar
+ * uma planilha nova pra um cliente vira só "escolher a planilha", sem recolar
+ * o JSON. Mesmo padrão do token Meta (gestao_leads_sources).
+ * ------------------------------------------------------------------ */
+
+/** Contas de serviço do Sheets já catalogadas — alimenta o seletor do wizard. */
+export async function listSheetsSources() {
+  const { data, error } = await supabase
+    .from("gestao_leads_sources")
+    .select("id, name, credentials")
+    .eq("provider_type", "google_sheets")
+    .order("created_at", { ascending: false });
+  if (error) return { success: false as const, error: error.message };
+  const sources = (data || []).map((s) => {
+    const cred = (s.credentials || {}) as { clientEmail?: string };
+    return { id: s.id as string, name: s.name as string, clientEmail: cred.clientEmail || "" };
+  });
+  return { success: true as const, sources };
+}
+
+/** Cadastra (ou reusa) uma Service Account do Sheets. Dedup por client_email. */
+export async function saveSheetsSource(data: { clientEmail: string; privateKey: string; name?: string }) {
+  const clientEmail = data.clientEmail.trim();
+  const privateKey = data.privateKey.trim();
+  if (!clientEmail || !privateKey) {
+    return { success: false as const, error: "client_email e private_key são obrigatórios." };
+  }
+
+  // Valida a credencial de verdade antes de salvar (chave inválida falha aqui).
+  const check = await listAccessibleSpreadsheets(clientEmail, privateKey, "");
+  if (!check.success) return { success: false as const, error: check.error };
+
+  // Mesma service account = um source só.
+  const { data: existing } = await supabase
+    .from("gestao_leads_sources")
+    .select("id, credentials")
+    .eq("provider_type", "google_sheets");
+  const match = (existing || []).find(
+    (s) => (s.credentials as { clientEmail?: string })?.clientEmail === clientEmail
+  );
+  if (match) return { success: true as const, sourceId: match.id as string, clientEmail };
+
+  const { data: source, error } = await supabase
+    .from("gestao_leads_sources")
+    .insert({
+      provider_type: "google_sheets",
+      name: data.name?.trim() || clientEmail.split("@")[0],
+      credentials: { clientEmail, privateKey },
+      status: "active",
+      last_validated_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error || !source) return { success: false as const, error: error?.message || "Falha ao salvar a conta de serviço." };
+  return { success: true as const, sourceId: source.id as string, clientEmail };
+}
+
+/** Lê a credencial do source no servidor — nunca devolve a private_key ao browser. */
+async function getSheetsSourceCreds(sourceId: string): Promise<{ clientEmail: string; privateKey: string } | null> {
+  const { data, error } = await supabase
+    .from("gestao_leads_sources")
+    .select("credentials")
+    .eq("id", sourceId)
+    .eq("provider_type", "google_sheets")
+    .maybeSingle();
+  if (error || !data) return null;
+  const cred = data.credentials as { clientEmail?: string; privateKey?: string };
+  if (!cred?.clientEmail || !cred?.privateKey) return null;
+  return { clientEmail: cred.clientEmail, privateKey: cred.privateKey };
+}
+
+/** Busca planilhas usando a credencial JÁ salva no source — sem recolar JSON. */
+export async function searchSpreadsheetsForSource(sourceId: string, search?: string) {
+  const creds = await getSheetsSourceCreds(sourceId);
+  if (!creds) return { success: false as const, error: "Conta de serviço não encontrada." };
+  return listAccessibleSpreadsheets(creds.clientEmail, creds.privateKey, search);
+}
+
+/** Lista as abas de uma planilha usando a credencial do source. */
+export async function listSheetTabsForSource(sourceId: string, spreadsheetId: string) {
+  const creds = await getSheetsSourceCreds(sourceId);
+  if (!creds) return { success: false as const, error: "Conta de serviço não encontrada." };
+  return listSheetTabs(creds.clientEmail, creds.privateKey, spreadsheetId);
+}
+
 export async function saveGoogleSheetsDestination(data: {
-  clientEmail: string;
-  privateKey: string;
+  clientEmail?: string;
+  privateKey?: string;
+  sourceId?: string;
   spreadsheetId: string;
   sheetName: string;
   fieldMapping?: Record<string, string>;
@@ -752,6 +854,21 @@ export async function saveGoogleSheetsDestination(data: {
   try {
     const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
 
+    // Credencial vem do source (catálogo) quando há sourceId; senão do JSON colado.
+    let clientEmail = data.clientEmail;
+    let privateKey = data.privateKey;
+    if (data.sourceId) {
+      const creds = await getSheetsSourceCreds(data.sourceId);
+      if (!creds) return { success: false, error: "Conta de serviço não encontrada." };
+      clientEmail = creds.clientEmail;
+      privateKey = creds.privateKey;
+    }
+    if (!clientEmail || !privateKey) {
+      return { success: false, error: "Credencial da service account ausente." };
+    }
+
+    // Mantém client_email/private_key no config (o sender lê daqui, sem mudança de
+    // runtime), e guarda o sourceId como referência ao catálogo.
     const { error } = await supabase
       .from("gestao_leads_destinations")
       .upsert(
@@ -759,8 +876,9 @@ export async function saveGoogleSheetsDestination(data: {
           workspace_id: workspaceId,
           type: "google_sheets",
           config: {
-            clientEmail: data.clientEmail,
-            privateKey: data.privateKey,
+            clientEmail,
+            privateKey,
+            sourceId: data.sourceId || null,
             spreadsheetId: data.spreadsheetId,
             sheetName: data.sheetName,
             fieldMapping: data.fieldMapping || {},

@@ -489,3 +489,79 @@ export async function pingKommoAccount(subdomain: string, token: string): Promis
     return { success: false, error: err instanceof Error ? err.message : "Erro de rede ao contatar o Kommo." };
   }
 }
+
+export interface KommoPipelineStatus {
+  id: number;
+  name: string;
+  sort: number;
+}
+
+export interface KommoPipeline {
+  id: number;
+  name: string;
+  isMain: boolean;
+  statuses: KommoPipelineStatus[];
+}
+
+interface KommoPipelineStatusRaw {
+  id: number;
+  name: string;
+  sort: number;
+  type?: number;
+}
+
+interface KommoPipelineRaw {
+  id: number;
+  name: string;
+  is_main?: boolean;
+  _embedded?: { statuses?: KommoPipelineStatusRaw[] };
+}
+
+interface KommoPipelinesResponse {
+  _embedded?: { pipelines?: KommoPipelineRaw[] };
+}
+
+/**
+ * Busca os pipelines (funis) e etapas reais da conta Kommo — usado para
+ * substituir a digitação manual de "Pipeline ID" / "Status ID" por uma
+ * seleção por nome (mesma filosofia de fetchKommoUsers para vendedores).
+ * Etapas de sistema "Venda ganha"/"Venda perdida" (type 1) ficam de fora —
+ * não fazem sentido como estágio INICIAL de um lead recém-chegado.
+ */
+export async function fetchKommoPipelines(subdomain: string, token: string): Promise<{ success: boolean; pipelines?: KommoPipeline[]; error?: string }> {
+  if (!subdomain || !token) {
+    return { success: false, error: "Subdomínio ou Token não fornecidos" };
+  }
+
+  const baseUrl = `https://${subdomain.toLowerCase().trim()}.kommo.com`;
+  const headers = { Authorization: `Bearer ${token.trim()}`, "Content-Type": "application/json" };
+
+  try {
+    const response = await fetch(`${baseUrl}/api/v4/leads/pipelines`, { method: "GET", headers });
+    if (!response.ok) {
+      if (response.status === 401) return { success: false, error: "Token inválido ou expirado." };
+      const errorText = await response.text();
+      return { success: false, error: `Kommo respondeu ${response.status}: ${errorText.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as KommoPipelinesResponse;
+    const raw = data._embedded?.pipelines || [];
+
+    const pipelines: KommoPipeline[] = raw.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isMain: !!p.is_main,
+      statuses: (p._embedded?.statuses || [])
+        // 142/143 = "Fechado - ganho"/"Fechado - perdido" — IDs fixos e universais
+        // do Kommo em TODO pipeline (confirmado contra conta real). Não fazem
+        // sentido como estágio INICIAL de um lead recém-chegado.
+        .filter((s) => s.id !== 142 && s.id !== 143)
+        .sort((a, b) => a.sort - b.sort)
+        .map((s) => ({ id: s.id, name: s.name, sort: s.sort })),
+    }));
+
+    return { success: true, pipelines };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Erro de rede ao contatar o Kommo." };
+  }
+}

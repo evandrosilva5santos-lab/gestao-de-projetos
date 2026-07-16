@@ -20,9 +20,15 @@ import {
   listGoogleSheetTabs,
   getWhatsAppGroupsHistory,
   syncWhatsAppGroups,
+  listKommoPipelines,
+  listSheetsSources,
+  saveSheetsSource,
+  searchSpreadsheetsForSource,
+  listSheetTabsForSource,
 } from "./actions";
 import type { SavedSource, SourcePage, SourceForm } from "./actions";
 import type { SpreadsheetOption } from "@/lib/leads/integrations/sheets";
+import type { KommoPipeline } from "@/lib/leads/integrations/kommo";
 
 // Porte pixel-exato do modal "Nova integração" de Agency OS.dc.html
 type ProviderId = "meta" | "sheets" | "kommo" | "evolution";
@@ -58,6 +64,13 @@ export function NewIntegrationModal({
   const [kommoToken, setKommoToken] = useState("");
   const [kommoPipeline, setKommoPipeline] = useState("");
   const [kommoStatus, setKommoStatus] = useState("");
+  // Pipeline/etapa por seleção real (busca na API) em vez de digitar o ID —
+  // ver docs/AUDITORIA-BOTOES-FICTICIOS.md item 3. Cai para texto manual se a
+  // busca falhar ou o usuário preferir.
+  const [kommoPipelines, setKommoPipelines] = useState<KommoPipeline[]>([]);
+  const [kommoPipelinesLoading, setKommoPipelinesLoading] = useState(false);
+  const [kommoPipelinesError, setKommoPipelinesError] = useState<string | null>(null);
+  const [kommoManualPipeline, setKommoManualPipeline] = useState(false);
 
   // Sheets state
   const [sheetsJsonRaw, setSheetsJsonRaw] = useState("");
@@ -68,6 +81,10 @@ export function NewIntegrationModal({
   const [sheetsName, setSheetsName] = useState("");
   // Duas formas de escolher a planilha, ambas sempre disponíveis (pedido explícito):
   // buscar pelo nome (via Drive API da própria Service Account) ou colar o link/ID direto.
+  // Service Accounts (Sheets) já catalogadas — pra não recolar o JSON a cada planilha.
+  const [sheetsSources, setSheetsSources] = useState<{ id: string; name: string; clientEmail: string }[]>([]);
+  const [sheetsSourceId, setSheetsSourceId] = useState<string | null>(null);
+  const [sheetsUseNew, setSheetsUseNew] = useState(false);
   const [sheetsMode, setSheetsMode] = useState<"search" | "manual">("search");
   const [sheetsSearchQuery, setSheetsSearchQuery] = useState("");
   const [sheetsSearchResults, setSheetsSearchResults] = useState<SpreadsheetOption[]>([]);
@@ -159,6 +176,24 @@ export function NewIntegrationModal({
     }
   }, [providerId, defaultWorkspaceId]);
 
+  // Ao abrir o passo Sheets numa integração NOVA, carrega as Service Accounts já
+  // catalogadas. Se existe alguma, o padrão é escolher da lista (sem recolar JSON);
+  // só cai no textarea de JSON quando não há nenhuma ou o usuário pede "nova conta".
+  useEffect(() => {
+    if (providerId !== "sheets" || editingConnection) return;
+    listSheetsSources().then((res) => {
+      if (!res.success) return;
+      setSheetsSources(res.sources);
+      if (res.sources.length > 0) {
+        setSheetsSourceId(res.sources[0].id);
+        setSheetsEmail(res.sources[0].clientEmail);
+        setSheetsUseNew(false);
+      } else {
+        setSheetsUseNew(true);
+      }
+    });
+  }, [providerId, editingConnection]);
+
   const handleSyncGroups = async () => {
     if (!defaultWorkspaceId) {
       setEvoGroupError("Abra esta integração de dentro de um cliente selecionado.");
@@ -183,6 +218,38 @@ export function NewIntegrationModal({
     } else {
       setEvoGroupError(res.error || "Erro ao buscar grupos.");
     }
+  };
+
+  /** Busca pipelines/etapas reais do Kommo — substitui a digitação manual do ID. */
+  const handleFetchPipelines = async () => {
+    if (!kommoSubdomain.trim() || !kommoToken.trim()) {
+      setKommoPipelinesError("Preencha Subdomínio e Access Token antes de buscar.");
+      return;
+    }
+    setKommoPipelinesLoading(true);
+    setKommoPipelinesError(null);
+    const res = await listKommoPipelines(kommoSubdomain.trim(), kommoToken.trim());
+    setKommoPipelinesLoading(false);
+
+    if (!res.success) {
+      setKommoPipelinesError(res.error);
+      return;
+    }
+    setKommoPipelines(res.pipelines);
+    if (res.pipelines.length === 0) {
+      setKommoPipelinesError("Nenhum pipeline encontrado nesta conta.");
+      return;
+    }
+
+    // Mantém a seleção atual se ela existir entre os pipelines encontrados;
+    // senão pré-seleciona o pipeline principal (ou o primeiro).
+    const currentPipeline = res.pipelines.find((p) => String(p.id) === kommoPipeline);
+    const chosenPipeline = currentPipeline || res.pipelines.find((p) => p.isMain) || res.pipelines[0];
+    setKommoPipeline(String(chosenPipeline.id));
+
+    const currentStatus = chosenPipeline.statuses.find((s) => String(s.id) === kommoStatus);
+    const chosenStatus = currentStatus || chosenPipeline.statuses[0];
+    setKommoStatus(chosenStatus ? String(chosenStatus.id) : "");
   };
 
   /** Conexão já cadastrada: páginas vêm do cache, sem recolar token nem esperar a Graph API. */
@@ -321,13 +388,18 @@ export function NewIntegrationModal({
    * antes do setState de sheetsEmail/sheetsKey terminar de propagar.
    */
   const handleSearchSheets = async (query: string, email?: string, key?: string) => {
-    const clientEmail = email ?? sheetsEmail;
-    const privateKey = key ?? sheetsKey;
-    if (!clientEmail || !privateKey) return;
-
+    // Conta catalogada (sourceId): a busca usa a credencial já salva no servidor,
+    // sem precisar do JSON. Conta nova: usa client_email/private_key do JSON colado.
     setSheetsSearching(true);
     setSheetsSearchError(null);
-    const res = await searchGoogleSpreadsheets({ clientEmail, privateKey, search: query });
+    const res = sheetsSourceId
+      ? await searchSpreadsheetsForSource(sheetsSourceId, query)
+      : await (async () => {
+          const clientEmail = email ?? sheetsEmail;
+          const privateKey = key ?? sheetsKey;
+          if (!clientEmail || !privateKey) return { success: false as const, error: "Cole o JSON da Service Account primeiro." };
+          return searchGoogleSpreadsheets({ clientEmail, privateKey, search: query });
+        })();
     setSheetsSearching(false);
 
     if (!res.success) {
@@ -342,7 +414,9 @@ export function NewIntegrationModal({
     setSheetsTabsLoading(true);
     setSheetsTabsError(null);
     setSheetsTabs([]);
-    const res = await listGoogleSheetTabs({ clientEmail: sheetsEmail, privateKey: sheetsKey, spreadsheetId });
+    const res = sheetsSourceId
+      ? await listSheetTabsForSource(sheetsSourceId, spreadsheetId)
+      : await listGoogleSheetTabs({ clientEmail: sheetsEmail, privateKey: sheetsKey, spreadsheetId });
     setSheetsTabsLoading(false);
 
     if (!res.success) {
@@ -396,8 +470,8 @@ export function NewIntegrationModal({
         alert("Erro ao salvar Kommo: " + res.error);
       }
     } else if (provider.id === "sheets") {
-      if (!sheetsEmail.trim() || !sheetsKey.trim()) {
-        alert("Cole o JSON da Service Account — não consegui identificar client_email/private_key.");
+      if (!sheetsSourceId && (!sheetsEmail.trim() || !sheetsKey.trim())) {
+        alert("Escolha uma conta de serviço ou cole o JSON de uma nova.");
         setIsSaving(false);
         return;
       }
@@ -407,14 +481,26 @@ export function NewIntegrationModal({
         return;
       }
 
+      // Conta nova (JSON colado): cataloga a Service Account uma vez, e daqui pra
+      // frente ela aparece no seletor — não se recola o JSON.
+      let resolvedSourceId = sheetsSourceId;
+      if (!resolvedSourceId) {
+        const srcRes = await saveSheetsSource({ clientEmail: sheetsEmail, privateKey: sheetsKey });
+        if (!srcRes.success) {
+          alert("Erro ao salvar a conta de serviço: " + srcRes.error);
+          setIsSaving(false);
+          return;
+        }
+        resolvedSourceId = srcRes.sourceId;
+      }
+
       const res = await saveGoogleSheetsDestination({
-        clientEmail: sheetsEmail,
-        privateKey: sheetsKey,
+        sourceId: resolvedSourceId,
         spreadsheetId: sheetsId,
         sheetName: sheetsName,
         workspaceId: defaultWorkspaceId
       });
-      
+
       if (res.success) {
         onCreate({
           id: Date.now().toString(),
@@ -702,50 +788,154 @@ export function NewIntegrationModal({
                 style={{ width: "100%", height: 80, padding: "12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 16, resize: "none" }}
               />
               
-              <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Pipeline ID (Opcional)</label>
-                  <input
-                    value={kommoPipeline}
-                    onChange={(e) => setKommoPipeline(e.target.value)}
-                    placeholder="ex: 13924251"
-                    style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Status ID (Opcional)</label>
-
-
-                  <input
-                    value={kommoStatus}
-                    onChange={(e) => setKommoStatus(e.target.value)}
-                    placeholder="ex: 107449871"
-                    style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
-                  />
-                </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 500 }}>Funil e etapa inicial (Opcional)</label>
+                <button
+                  onClick={() => { setKommoManualPipeline(false); handleFetchPipelines(); }}
+                  disabled={kommoPipelinesLoading || !kommoSubdomain.trim() || !kommoToken.trim()}
+                  style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 12, fontWeight: 600, cursor: kommoPipelinesLoading ? "wait" : "pointer", padding: 0, opacity: !kommoSubdomain.trim() || !kommoToken.trim() ? 0.5 : 1 }}
+                >
+                  {kommoPipelinesLoading ? "Buscando..." : "Buscar pipelines"}
+                </button>
               </div>
+
+              {kommoPipelinesError && (
+                <div style={{ padding: "8px 10px", borderRadius: 8, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12, marginBottom: 10 }}>
+                  {kommoPipelinesError}
+                </div>
+              )}
+
+              {!kommoManualPipeline && kommoPipelines.length > 0 ? (
+                <>
+                  <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <select
+                        value={kommoPipeline}
+                        onChange={(e) => {
+                          const pipe = kommoPipelines.find((p) => String(p.id) === e.target.value);
+                          setKommoPipeline(e.target.value);
+                          setKommoStatus(pipe?.statuses[0] ? String(pipe.statuses[0].id) : "");
+                        }}
+                        style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                      >
+                        {kommoPipelines.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}{p.isMain ? " (principal)" : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <select
+                        value={kommoStatus}
+                        onChange={(e) => setKommoStatus(e.target.value)}
+                        style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                      >
+                        {(kommoPipelines.find((p) => String(p.id) === kommoPipeline)?.statuses || []).map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setKommoManualPipeline(true)}
+                    style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 11.5, textDecoration: "underline", cursor: "pointer", padding: 0, marginBottom: 16 }}
+                  >
+                    Digitar ID manualmente
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        value={kommoPipeline}
+                        onChange={(e) => setKommoPipeline(e.target.value)}
+                        placeholder="Pipeline ID — ex: 13924251"
+                        style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        value={kommoStatus}
+                        onChange={(e) => setKommoStatus(e.target.value)}
+                        placeholder="Status ID — ex: 107449871"
+                        style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none" }}
+                      />
+                    </div>
+                  </div>
+                  {kommoPipelines.length > 0 && (
+                    <button
+                      onClick={() => setKommoManualPipeline(false)}
+                      style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 11.5, textDecoration: "underline", cursor: "pointer", padding: 0, marginBottom: 16 }}
+                    >
+                      Escolher da lista
+                    </button>
+                  )}
+                  {kommoPipelines.length === 0 && <div style={{ marginBottom: 16 }} />}
+                </>
+              )}
             </>
           )}
 
           {step === 1 && provider && provider.id === "sheets" && (
             <>
               <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Configuração · {provider.label}</div>
-              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
-                Cole o conteúdo do arquivo JSON da Service Account (baixado no Google Cloud Console) — o e-mail e a chave são extraídos automaticamente.
-              </div>
 
-              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>JSON da Service Account</label>
-              <textarea
-                value={sheetsJsonRaw}
-                onChange={(e) => handleSheetsJsonPaste(e.target.value)}
-                placeholder='{"type": "service_account", "client_email": "...", "private_key": "..."}'
-                style={{ width: "100%", height: 90, padding: "12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 12, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 10, resize: "none" }}
-              />
+              {/* Conta de serviço: escolhe uma já cadastrada (sem recolar JSON) ou adiciona nova. */}
+              {sheetsSources.length > 0 && !editingConnection && (
+                <>
+                  <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Conta de serviço (Google)</label>
+                  <select
+                    value={sheetsUseNew ? "__new__" : (sheetsSourceId ?? "")}
+                    onChange={(e) => {
+                      if (e.target.value === "__new__") {
+                        setSheetsUseNew(true);
+                        setSheetsSourceId(null);
+                        setSheetsEmail("");
+                        setSheetsKey("");
+                        setSheetsJsonRaw("");
+                        setSheetsSearchResults([]);
+                        setSheetsId("");
+                        setSelectedSpreadsheetName(null);
+                      } else {
+                        const src = sheetsSources.find((s) => s.id === e.target.value);
+                        setSheetsUseNew(false);
+                        setSheetsSourceId(e.target.value);
+                        setSheetsEmail(src?.clientEmail ?? "");
+                        setSheetsSearchResults([]);
+                        setSheetsId("");
+                        setSelectedSpreadsheetName(null);
+                      }
+                    }}
+                    style={{ width: "100%", height: 40, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 12 }}
+                  >
+                    {sheetsSources.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name} · {s.clientEmail}</option>
+                    ))}
+                    <option value="__new__">+ Nova conta de serviço (colar JSON)</option>
+                  </select>
+                </>
+              )}
 
-              {sheetsJsonError && (
-                <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>
-                  {sheetsJsonError}
-                </div>
+              {(sheetsUseNew || sheetsSources.length === 0 || editingConnection) && (
+                <>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+                    Cole o conteúdo do arquivo JSON da Service Account (baixado no Google Cloud Console) — o e-mail e a chave são extraídos automaticamente. Fica salvo: da próxima vez é só escolher da lista.
+                  </div>
+
+                  <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>JSON da Service Account</label>
+                  <textarea
+                    value={sheetsJsonRaw}
+                    onChange={(e) => handleSheetsJsonPaste(e.target.value)}
+                    placeholder='{"type": "service_account", "client_email": "...", "private_key": "..."}'
+                    style={{ width: "100%", height: 90, padding: "12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 12, fontFamily: "var(--font-geist-mono, monospace)", outline: "none", marginBottom: 10, resize: "none" }}
+                  />
+
+                  {sheetsJsonError && (
+                    <div style={{ padding: "10px 12px", borderRadius: 9, background: "var(--em-bg)", border: "1px solid var(--em-bd)", color: "var(--em-fg)", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>
+                      {sheetsJsonError}
+                    </div>
+                  )}
+                </>
               )}
 
               {sheetsEmail && !sheetsJsonError && (
