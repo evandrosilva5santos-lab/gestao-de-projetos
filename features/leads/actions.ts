@@ -5,6 +5,7 @@ import type { SellerAvailability } from "@/lib/leads/availability";
 import type { QualificationRule } from "@/lib/leads/qualification";
 import { DEFAULT_TEMPLATES, type MessageTemplates } from "@/lib/leads/templates";
 import { fetchKommoUsers } from "@/lib/leads/integrations/kommo";
+import { fetchMetaFormLeads } from "@/lib/leads/providers/meta";
 
 /**
  * Templates de mensagem por cliente (cliente + grupo). Ficam na coluna
@@ -822,5 +823,55 @@ export async function getLeadsWithFilters(
     availableOrigins: filteredOrigins,
     availableStatuses: filteredStatuses,
     availableSellers,
+  };
+}
+
+/**
+ * Auditoria de leads: compara os leads que a Meta REALMENTE registrou pra um
+ * formulário (fonte da verdade, via Graph API) contra o que chegou no nosso
+ * banco (por leadgen_id). Read-only — não altera nada, só aponta divergência.
+ */
+export async function auditLeadForm(connectionId: string, formId: string) {
+  const { data: conn, error: connErr } = await supabase
+    .from("gestao_leads_meta_connections")
+    .select("access_token, workspace_id")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (connErr || !conn) {
+    return { success: false as const, error: "Conexão não encontrada." };
+  }
+
+  const metaRes = await fetchMetaFormLeads(formId, conn.access_token);
+  if (!metaRes.success) {
+    return { success: false as const, error: metaRes.error };
+  }
+
+  const { data: systemLeads, error: leadsErr } = await supabase
+    .from("gestao_leads")
+    .select("leadgen_id, status")
+    .eq("workspace_id", conn.workspace_id)
+    .not("leadgen_id", "is", null);
+
+  if (leadsErr) {
+    return { success: false as const, error: "Erro ao consultar os leads do sistema." };
+  }
+
+  const systemByLeadgenId = new Map((systemLeads || []).map((l) => [l.leadgen_id, l.status]));
+
+  const rows = metaRes.leads
+    .map((l) => ({
+      leadgenId: l.id,
+      createdTime: l.createdTime,
+      name: l.fields.full_name || l.fields.name || l.fields.nome_completo || "—",
+      systemStatus: systemByLeadgenId.get(l.id) ?? null,
+    }))
+    .sort((a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime());
+
+  return {
+    success: true as const,
+    totalInMeta: rows.length,
+    totalMissing: rows.filter((r) => r.systemStatus === null).length,
+    rows,
   };
 }

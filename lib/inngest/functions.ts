@@ -4,6 +4,7 @@ import { sendLeadToKommo } from "../leads/integrations/kommo";
 import { appendLeadToSheets } from "../leads/integrations/sheets";
 import { sendLeadToWhatsApp } from "../leads/integrations/evolution";
 import { isLeadQualified, type QualificationRule } from "../leads/qualification";
+import { fetchMetaLeadDetails } from "../leads/providers/meta";
 
 // Função auxiliar para normalizar o telefone no formato brasileiro
 function normalizePhone(rawPhone: string): string {
@@ -42,10 +43,42 @@ export const processNewLead = inngest.createFunction(
   async ({ event, step }) => {
     const { workspaceId, source, rawPayload } = event.data;
 
+    // 0. Leads da Meta: o webhook manda só o leadgen_id — a Meta nunca entrega os
+    // valores preenchidos no formulário (nome/telefone/email) via webhook, por
+    // design própria dela. É preciso buscar à parte na Graph API, autenticado com
+    // o access_token da página dona do formulário. Sem isso, todo lead da Meta
+    // chegava aqui como "Sem Nome" / telefone e email vazios.
+    const enrichedPayload = await step.run("enrich-meta-lead-data", async () => {
+      if (source !== "Meta Ads" || !rawPayload.leadgen_id || !rawPayload.page_id) {
+        return rawPayload;
+      }
+
+      const { data: conn } = await supabaseAdmin
+        .from("gestao_leads_meta_connections")
+        .select("access_token")
+        .eq("page_id", String(rawPayload.page_id))
+        .limit(1)
+        .maybeSingle();
+
+      if (!conn?.access_token) {
+        console.warn(`Sem access_token cadastrado pra página ${rawPayload.page_id} — lead ${rawPayload.leadgen_id} ficará sem os dados do formulário.`);
+        return rawPayload;
+      }
+
+      const details = await fetchMetaLeadDetails(String(rawPayload.leadgen_id), conn.access_token);
+      if (!details.success) {
+        console.error(`Falha ao buscar dados do lead ${rawPayload.leadgen_id} na Graph API: ${details.error}`);
+        return rawPayload;
+      }
+
+      return { ...rawPayload, ...details.fields };
+    });
+
     // 1. Identificar Conexão e normalizar dados
     const treatedData = await step.run("normalize-lead-data", async () => {
-      const rawName = rawPayload.name || rawPayload.nome || rawPayload.nome_completo || "Sem Nome";
-      const rawPhone = rawPayload.phone || rawPayload.telefone || "";
+      const rawPayload = enrichedPayload;
+      const rawName = rawPayload.name || rawPayload.nome || rawPayload.nome_completo || rawPayload.full_name || "Sem Nome";
+      const rawPhone = rawPayload.phone || rawPayload.telefone || rawPayload.phone_number || "";
       const rawEmail = rawPayload.email || rawPayload.e_mail || "";
 
       // Tenta mapear o page_id vindo da Meta para descobrir a conexão
@@ -199,7 +232,7 @@ export const processNewLead = inngest.createFunction(
           seller_id: assignedSellerId,
           leadgen_id: treatedData.leadgenId,
           raw_data: {
-            ...rawPayload,
+            ...enrichedPayload,
             treated: treatedData
           }
         })
