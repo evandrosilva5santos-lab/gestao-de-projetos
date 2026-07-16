@@ -12,9 +12,11 @@ import { OverviewTab } from "./OverviewTab";
 import { ClientsListScreen } from "./ClientsListScreen";
 import { ClientWorkspaceShell } from "./ClientWorkspaceShell";
 import { ComingSoonPanel } from "./ComingSoonPanel";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { IntegrationHubTab } from "@/features/integration-hub/components/IntegrationHubTab";
 import { LogsTab } from "./LogsTab";
 import { RoutingRulesTab } from "./RoutingRulesTab";
+import { ConfiguracoesShell } from "./ConfiguracoesShell";
 import { getWorkspaceById } from "../actions";
 
 // Porte pixel-exato de "Agency OS.dc.html" (protótipo de design do usuário),
@@ -22,28 +24,30 @@ import { getWorkspaceById } from "../actions";
 // "Clientes" é o eixo — Vendedores/Rodada, Fontes de Entrada e Destinos vivem
 // DENTRO do cliente selecionado (ClientWorkspaceShell), não como itens de nav
 // à parte. "CRM & Funil" foi removido daqui — é o StartCRM, produto separado.
-type ScreenKey = "motor" | "central" | "dashboard" | "clientes" | "regras" | "logs";
+type ScreenKey = "motor" | "central" | "dashboard" | "clientes" | "regras" | "logs" | "config";
 
 const NAV_GROUPS: { label: string; items: { key: ScreenKey; label: string; Icon: typeof MotorIcon }[] }[] = [
   {
     label: "PRINCIPAL",
     items: [
-      { key: "clientes", label: "Clientes (Workspaces)", Icon: ClientesIcon },
-      { key: "dashboard", label: "Visão Geral (Agência)", Icon: DashboardIcon }
+      { key: "dashboard", label: "Visão Geral (Agência)", Icon: DashboardIcon },
+      { key: "clientes", label: "Clientes (Workspaces)", Icon: ClientesIcon }
     ]
   },
   {
     label: "AGÊNCIA",
     items: [
-      { key: "central", label: "Central de Integrações", Icon: CentralIcon },
-      { key: "motor", label: "Motor de Processamento", Icon: MotorIcon }
+      { key: "motor", label: "Motor de Processamento", Icon: MotorIcon },
+      { key: "regras", label: "Regras de Roteamento", Icon: GearIcon }
     ]
   },
   {
-    label: "OPERAÇÃO",
+    label: "SISTEMA",
     items: [
-      { key: "regras", label: "Regras de Roteamento", Icon: GearIcon },
-      { key: "logs", label: "Logs & Automação", Icon: LogsIcon }
+      // Integrações (Central), Logs e Documentação agora vivem DENTRO de
+      // Configurações (ver arquitetura do menu Configurações). Um só ponto de
+      // entrada pra tudo que é de agência.
+      { key: "config", label: "Configurações", Icon: CentralIcon }
     ]
   }
 ];
@@ -62,7 +66,8 @@ export function LeadsDashboardShell() {
 
   const [screen, setScreen] = useState<ScreenKey>("clientes");
   const [dark, setDark] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // para mobile
+  const [isCollapsed, setIsCollapsed] = useState(false); // para desktop
   // Só o NOME fica em estado local — o id de verdade mora na URL (?workspace=id),
   // que é o que sobrevive a navegar pra outra tela e voltar, refresh e link
   // compartilhado. Ver memória "fix_workspace_context_persistence".
@@ -119,6 +124,8 @@ export function LeadsDashboardShell() {
     content = <RoutingRulesTab workspaceId={workspaceId || undefined} />;
   } else if (screen === "logs") {
     content = <LogsTab workspaceId={workspaceId || undefined} />;
+  } else if (screen === "config") {
+    content = <ConfiguracoesShell workspaceId={workspaceId || undefined} />;
   } else {
     content = COMING_SOON[screen] && <ComingSoonPanel {...COMING_SOON[screen]!} />;
   }
@@ -146,7 +153,8 @@ export function LeadsDashboardShell() {
         {/* Sidebar */}
         <aside
           style={{
-            width: 256,
+            width: isCollapsed ? 76 : 256,
+            transition: "width 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
             background: "var(--sidebar)",
             borderRight: "1px solid var(--border)",
             display: "flex",
@@ -162,64 +170,84 @@ export function LeadsDashboardShell() {
           }}
           className={sidebarOpen ? "flex" : "hidden md:flex"}
         >
-          <div style={{ height: 60, display: "flex", alignItems: "center", padding: "0 22px", borderBottom: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--accent)", fontWeight: 700, fontSize: 19, letterSpacing: "-.02em" }}>
-              <LogoIcon size={23} />
-              Agency OS
-            </div>
+          <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: isCollapsed ? "center" : "space-between", padding: isCollapsed ? "0" : "0 18px", borderBottom: "1px solid var(--border)", overflow: "hidden" }}>
+            {!isCollapsed && (
+              <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--accent)", fontWeight: 700, fontSize: 19, letterSpacing: "-.02em" }}>
+                <LogoIcon size={23} />
+                Agency OS
+              </div>
+            )}
+            {isCollapsed && <LogoIcon size={23} style={{ color: "var(--accent)" }} />}
+            
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="hidden md:flex"
+              style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", border: "none", background: "transparent", color: "var(--muted)", borderRadius: 6, cursor: "pointer", marginLeft: isCollapsed ? 0 : 8 }}
+            >
+              {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
           </div>
-          <nav style={{ flex: 1, padding: 14, display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" }}>
-            {NAV_GROUPS.map((group) => (
-              <div key={group.label}>
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".08em", color: "var(--faint)", padding: "8px 10px 4px" }}>
-                  {group.label}
-                </div>
+          <nav style={{ flex: 1, padding: isCollapsed ? "14px 10px" : "14px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", overflowX: "hidden" }}>
+            {NAV_GROUPS.map((group, groupIdx) => (
+              <div key={group.label} style={{ marginTop: groupIdx > 0 ? 12 : 0 }}>
+                {isCollapsed ? (
+                  <div style={{ height: 1, background: "var(--border)", margin: "8px 10px" }} />
+                ) : (
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".08em", color: "var(--faint)", padding: "8px 10px 4px", whiteSpace: "nowrap" }}>
+                    {group.label}
+                  </div>
+                )}
                 {group.items.map(({ key, label, Icon }) => (
                   <button
                     key={key}
                     onClick={() => {
                       setScreen(key);
                       setSidebarOpen(false);
-                      // Clicar em "Clientes" NÃO reseta mais o cliente ativo — só o
-                      // botão "← Clientes" dentro do shell (onBack) faz isso, de propósito.
                     }}
+                    title={isCollapsed ? label : undefined}
                     style={{
                       width: "100%",
                       height: 36,
                       display: "flex",
                       alignItems: "center",
-                      gap: 10,
-                      padding: "0 10px",
+                      justifyContent: isCollapsed ? "center" : "flex-start",
+                      gap: isCollapsed ? 0 : 10,
+                      padding: isCollapsed ? 0 : "0 10px",
                       border: "none",
                       borderRadius: 9,
                       fontSize: 14,
                       fontWeight: 500,
                       cursor: "pointer",
                       background: screen === key ? "var(--soft-bg)" : "transparent",
-                      color: screen === key ? "var(--soft-fg)" : "var(--fg2)"
+                      color: screen === key ? "var(--soft-fg)" : "var(--fg2)",
+                      transition: "all 0.2s"
                     }}
                   >
-                    <Icon size={17} />
-                    {label}
+                    <Icon size={17} style={{ minWidth: 17 }} />
+                    {!isCollapsed && <span style={{ whiteSpace: "nowrap" }}>{label}</span>}
                   </button>
                 ))}
               </div>
             ))}
           </nav>
-          <div style={{ padding: 14, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 11 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 9999, background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13 }}>
+          <div style={{ padding: 14, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: isCollapsed ? "center" : "flex-start", gap: 11, overflow: "hidden" }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9999, background: "var(--accent)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
               EA
             </div>
-            <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 13.5, fontWeight: 600 }}>Admin</span>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Agência Mega</span>
-            </div>
-            <button
-              title="Sair"
-              style={{ width: 30, height: 30, border: "none", background: "transparent", color: "var(--muted)", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-            >
-              <LogoutIcon size={16} />
-            </button>
+            {!isCollapsed && (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap" }}>Admin</span>
+                  <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Agência Mega</span>
+                </div>
+                <button
+                  title="Sair"
+                  style={{ width: 30, height: 30, flexShrink: 0, border: "none", background: "transparent", color: "var(--muted)", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  <LogoutIcon size={16} />
+                </button>
+              </>
+            )}
           </div>
         </aside>
 
@@ -242,13 +270,7 @@ export function LeadsDashboardShell() {
               zIndex: 40
             }}
           >
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="md:hidden"
-              style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", background: "var(--card)", borderRadius: 9, cursor: "pointer", color: "var(--fg)" }}
-            >
-              <MenuIcon size={18} />
-            </button>
+
             <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 11px", borderRadius: 9999, background: "var(--em-bg)", border: "1px solid var(--em-bd)", whiteSpace: "nowrap" }}>
               <span style={{ position: "relative", width: 7, height: 7 }}>
                 <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "var(--green)" }} />
