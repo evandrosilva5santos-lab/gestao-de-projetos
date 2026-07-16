@@ -9,23 +9,24 @@ import { getMessageTemplates, saveMessageTemplates } from "../actions";
 import {
   renderTemplate,
   buildLeadContext,
-  TEMPLATE_VARIABLES,
+  TEMPLATE_VARIABLE_DEFS,
   DEFAULT_TEMPLATES,
   type MessageTemplate,
   type MessageTemplates,
 } from "@/lib/leads/templates";
 
-// Lead de exemplo pra prévia — só ilustra as variáveis, não é dado real.
+// Lead de exemplo pra prévia — reflete um lead real de consórcio, não é dado real.
 const SAMPLE = buildLeadContext({
-  name: "João Silva",
-  phone: "5551990001122",
-  email: "joao@email.com",
-  city: "Porto Alegre",
-  state: "RS",
-  product: "Consórcio",
-  consultant: "Marcos C.",
-  source: "Meta Ads",
-  company: "Agência Mega",
+  name: "Roseli Putton",
+  phone: "5551998423942",
+  email: "roseliputton566@gmail.com",
+  interest: "Imóvel",
+  budget: "De 150 Mil A 300 Mil",
+  monthly: "Maior Que 20 Mil",
+  salaryRange: "De 10 a 20 Mil",
+  startTime: "Estou pesquisando",
+  consultant: "Sandro",
+  source: "Meta",
 });
 
 function TemplateEditor({
@@ -91,9 +92,9 @@ function TemplateEditor({
             placeholder="Escreva a mensagem. Use {{nome}}, {{produto}}, {{saudacao}}..."
           />
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {TEMPLATE_VARIABLES.map((v) => (
-              <button key={v} onClick={() => insertToken(v)} className="text-[11px] font-mono px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50" title={`Inserir {{${v}}}`}>
-                {`{{${v}}}`}
+            {TEMPLATE_VARIABLE_DEFS.map((v) => (
+              <button key={v.key} onClick={() => insertToken(v.key)} className="text-[11px] font-mono px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50" title={v.hint}>
+                {`{{${v.key}}}`}
               </button>
             ))}
           </div>
