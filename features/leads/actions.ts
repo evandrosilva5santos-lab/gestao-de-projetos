@@ -178,6 +178,21 @@ export async function getAllSellersQueue() {
   return { success: true as const, groups };
 }
 
+/**
+ * "Passar a vez" — empurra o vendedor da vez pro fim da fila sem atribuir lead,
+ * setando last_assigned_at = agora (o mesmo critério de ordenação que o RPC
+ * assign_next_seller* usa: ASC NULLS FIRST). O próximo da fila vira a vez.
+ */
+export async function passarVez(sellerId: string) {
+  const { error } = await supabase
+    .from("gestao_leads_sellers")
+    .update({ last_assigned_at: new Date().toISOString() })
+    .eq("id", sellerId);
+
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const };
+}
+
 export async function toggleSellerActive(sellerId: string, isActive: boolean) {
   const { error } = await supabase
     .from("gestao_leads_sellers")

@@ -13,7 +13,8 @@ import {
   updateSeller,
   deleteSeller,
   getWorkspaceRules,
-  updateWorkspaceRules
+  updateWorkspaceRules,
+  passarVez
 } from "../actions";
 import { isSellerAvailable, WEEKDAY_LABELS, type SellerAvailability } from "@/lib/leads/availability";
 import type { QualificationRule, QualificationCriterion } from "@/lib/leads/qualification";
@@ -54,6 +55,13 @@ function relativeTime(iso: string | null): string {
   if (hours < 24) return `Há ${hours} h`;
   const days = Math.floor(hours / 24);
   return `Há ${days} dia(s)`;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 type SellerForm = { name: string; phone: string; crmUserId: string; availability: SellerAvailability };
@@ -230,6 +238,21 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
     load();
   };
 
+  const handlePassarVez = async (seller: Seller) => {
+    // Otimista: joga o atual pro fim (last_assigned_at = agora), a fila reordena.
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        sellers: g.sellers.map((s) => (s.id === seller.id ? { ...s, lastAssignedAt: new Date().toISOString() } : s)),
+      }))
+    );
+    const res = await passarVez(seller.id);
+    if (!res.success) {
+      alert("Erro ao passar a vez: " + res.error);
+      load();
+    }
+  };
+
   if (error) {
     return (
       <Card>
@@ -258,8 +281,77 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
           });
         const positionOf = new Map(activeSorted.map((s, i) => [s.id, i]));
 
+        // "Quem recebe o próximo lead" = primeiro ATIVO e DISPONÍVEL na ordem —
+        // mesmo critério do RPC (que pula indisponível). Se a fila está pausada
+        // ou ninguém disponível, não há vez.
+        const availableSorted = rules.queuePaused
+          ? []
+          : activeSorted.filter((s) => isSellerAvailable(s.availability, rules));
+        const currentSeller = availableSorted[0] ?? null;
+        const nextSeller = availableSorted[1] ?? null;
+        const withPhone = group.sellers.filter((s) => !!s.phone).length;
+
         return (
-          <Card key={group.workspaceId}>
+          <div key={group.workspaceId} className="flex flex-col gap-5">
+          {workspaceId && (
+            <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4">
+              {/* Rodada da Vez */}
+              <div className="rounded-2xl p-6 text-white bg-indigo-600">
+                <div className="text-xs font-semibold tracking-wider uppercase opacity-85">
+                  Rodada da vez · {group.workspaceName}
+                </div>
+                {currentSeller ? (
+                  <>
+                    <div className="flex items-center gap-4 mt-4">
+                      <div className="w-13 h-13 min-w-[52px] rounded-full bg-white/20 flex items-center justify-center font-bold text-lg" style={{ width: 52, height: 52 }}>
+                        {initials(currentSeller.name)}
+                      </div>
+                      <div>
+                        <div className="text-[22px] font-bold leading-tight">{currentSeller.name}</div>
+                        <div className="text-sm opacity-85">é quem recebe o próximo lead</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 mt-5 flex-wrap">
+                      <Button
+                        onClick={() => handlePassarVez(currentSeller)}
+                        className="bg-white text-indigo-600 hover:bg-indigo-50 font-bold h-10"
+                      >
+                        Passar a vez →
+                      </Button>
+                      {nextSeller && (
+                        <span className="text-sm opacity-90">Próximo: <b>{nextSeller.name}</b></span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-4 text-sm opacity-90">
+                    {rules.queuePaused
+                      ? "Fila pausada — nenhum lead está sendo distribuído."
+                      : "Nenhum vendedor disponível agora para receber leads."}
+                  </div>
+                )}
+              </div>
+
+              {/* Status WhatsApp */}
+              <div className="rounded-2xl p-5 bg-white border border-slate-200 flex flex-col justify-center gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm">Ev</div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">{withPhone} de {group.sellers.length} com WhatsApp</div>
+                    <div className="text-xs text-slate-500">{group.workspaceName} · via Evolution API</div>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed pt-3 border-t border-slate-100 m-0">
+                  As mensagens saem <b>do número do próprio vendedor</b> — não do gestor. Cada um usa o WhatsApp dele.
+                </p>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="text-emerald-500">🔒</span>
+                  Distribuição transacional — lock de concorrência impede dois vendedores no mesmo lead.
+                </div>
+              </div>
+            </div>
+          )}
+          <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
@@ -399,6 +491,7 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
               </Table>
             </CardContent>
           </Card>
+          </div>
         );
       })}
 
