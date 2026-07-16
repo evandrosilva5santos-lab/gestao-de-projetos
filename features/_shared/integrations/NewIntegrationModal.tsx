@@ -127,6 +127,12 @@ export function NewIntegrationModal({
   const [metaLoadingForms, setMetaLoadingForms] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
   const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  // Cliente (workspace) da integração para os provedores Kommo/Sheets/Evolution.
+  // Quando o modal abre a partir de uma tela de cliente já dá pra saber (defaultWorkspaceId);
+  // quando abre da Central de Integrações (nível do sistema) não há como saber sem perguntar
+  // — sem isso, o save caía num fallback de "primeiro workspace do banco" e sobrescrevia
+  // silenciosamente a integração de outro cliente (mesma unique key workspace_id+type).
+  const [destWorkspaceId, setDestWorkspaceId] = useState<string>(defaultWorkspaceId || "");
   const [metaWorkspaceId, setMetaWorkspaceId] = useState<string>(defaultWorkspaceId || "");
   const [metaNewWorkspaceName, setMetaNewWorkspaceName] = useState("");
   const [metaSellers, setMetaSellers] = useState<{ name: string; phone: string }[]>([{ name: "", phone: "" }]);
@@ -145,7 +151,8 @@ export function NewIntegrationModal({
       if (editingConnection.type) {
         setProviderId(editingConnection.type as ProviderId);
         setStep(1); // or 2 for meta, but meta editing will need special handling
-        
+        setDestWorkspaceId(editingConnection.workspaceId || defaultWorkspaceId || "");
+
         if (editingConnection.type === "kommo" && editingConnection.config) {
           setKommoSubdomain(editingConnection.config.subdomain || "");
           setKommoToken(editingConnection.config.token || "");
@@ -169,12 +176,12 @@ export function NewIntegrationModal({
   // Carrega o histórico de grupos já sincronizados pra este cliente assim que a
   // etapa Evolution abre — evita telas vazias quando alguém já buscou antes.
   useEffect(() => {
-    if (providerId === "evolution" && defaultWorkspaceId) {
-      getWhatsAppGroupsHistory(defaultWorkspaceId).then((res) => {
+    if (providerId === "evolution" && destWorkspaceId) {
+      getWhatsAppGroupsHistory(destWorkspaceId).then((res) => {
         if (res.success && res.groups) setEvoGroupHistory(res.groups);
       });
     }
-  }, [providerId, defaultWorkspaceId]);
+  }, [providerId, destWorkspaceId]);
 
   // Ao abrir o passo Sheets numa integração NOVA, carrega as Service Accounts já
   // catalogadas. Se existe alguma, o padrão é escolher da lista (sem recolar JSON);
@@ -195,8 +202,8 @@ export function NewIntegrationModal({
   }, [providerId, editingConnection]);
 
   const handleSyncGroups = async () => {
-    if (!defaultWorkspaceId) {
-      setEvoGroupError("Abra esta integração de dentro de um cliente selecionado.");
+    if (!destWorkspaceId) {
+      setEvoGroupError("Selecione o cliente (workspace) desta integração antes de buscar grupos.");
       return;
     }
     if (!evoUrl || !evoToken || !evoInstance) {
@@ -206,14 +213,14 @@ export function NewIntegrationModal({
     setEvoGroupSyncing(true);
     setEvoGroupError(null);
     const res = await syncWhatsAppGroups({
-      workspaceId: defaultWorkspaceId,
+      workspaceId: destWorkspaceId,
       url: evoUrl,
       token: evoToken,
       instanceName: evoInstance,
     });
     setEvoGroupSyncing(false);
     if (res.success) {
-      const historyRes = await getWhatsAppGroupsHistory(defaultWorkspaceId);
+      const historyRes = await getWhatsAppGroupsHistory(destWorkspaceId);
       if (historyRes.success && historyRes.groups) setEvoGroupHistory(historyRes.groups);
     } else {
       setEvoGroupError(res.error || "Erro ao buscar grupos.");
@@ -441,12 +448,17 @@ export function NewIntegrationModal({
     setIsSaving(true);
     
     if (provider.id === "kommo") {
+      if (!destWorkspaceId) {
+        alert("Selecione o cliente (workspace) desta integração.");
+        setIsSaving(false);
+        return;
+      }
       const res = await saveKommoDestination({
         subdomain: kommoSubdomain,
         token: kommoToken,
         pipelineId: kommoPipeline,
         statusId: kommoStatus,
-        workspaceId: defaultWorkspaceId
+        workspaceId: destWorkspaceId
       });
       
       if (res.success) {
@@ -470,6 +482,11 @@ export function NewIntegrationModal({
         alert("Erro ao salvar Kommo: " + res.error);
       }
     } else if (provider.id === "sheets") {
+      if (!destWorkspaceId) {
+        alert("Selecione o cliente (workspace) desta integração.");
+        setIsSaving(false);
+        return;
+      }
       if (!sheetsSourceId && (!sheetsEmail.trim() || !sheetsKey.trim())) {
         alert("Escolha uma conta de serviço ou cole o JSON de uma nova.");
         setIsSaving(false);
@@ -498,7 +515,7 @@ export function NewIntegrationModal({
         sourceId: resolvedSourceId,
         spreadsheetId: sheetsId,
         sheetName: sheetsName,
-        workspaceId: defaultWorkspaceId
+        workspaceId: destWorkspaceId
       });
 
       if (res.success) {
@@ -518,6 +535,11 @@ export function NewIntegrationModal({
         alert("Erro ao salvar Sheets: " + res.error);
       }
     } else if (provider.id === "evolution") {
+      if (!destWorkspaceId) {
+        alert("Selecione o cliente (workspace) desta integração.");
+        setIsSaving(false);
+        return;
+      }
       if (!evoUrl.trim() || !evoToken.trim() || !evoInstance.trim()) {
         alert("Preencha URL, API Key e nome da instância.");
         setIsSaving(false);
@@ -529,7 +551,7 @@ export function NewIntegrationModal({
         token: evoToken,
         instanceName: evoInstance,
         groupJid: evoGroup,
-        workspaceId: defaultWorkspaceId
+        workspaceId: destWorkspaceId
       });
       
       if (res.success) {
@@ -771,7 +793,20 @@ export function NewIntegrationModal({
           {step === 1 && provider && provider.id === "kommo" && (
             <>
               <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 16 }}>Configuração · {provider.label}</div>
-              
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Cliente (Workspace)</label>
+              <select
+                value={destWorkspaceId}
+                onChange={(e) => setDestWorkspaceId(e.target.value)}
+                disabled={!!defaultWorkspaceId}
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16, opacity: defaultWorkspaceId ? 0.7 : 1 }}
+              >
+                <option value="" disabled>Selecione o cliente...</option>
+                {workspaces.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+
               <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Subdomínio Kommo</label>
               <input
                 value={kommoSubdomain}
@@ -879,6 +914,19 @@ export function NewIntegrationModal({
           {step === 1 && provider && provider.id === "sheets" && (
             <>
               <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 6 }}>Configuração · {provider.label}</div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginTop: 10, marginBottom: 6 }}>Cliente (Workspace)</label>
+              <select
+                value={destWorkspaceId}
+                onChange={(e) => setDestWorkspaceId(e.target.value)}
+                disabled={!!defaultWorkspaceId}
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16, opacity: defaultWorkspaceId ? 0.7 : 1 }}
+              >
+                <option value="" disabled>Selecione o cliente...</option>
+                {workspaces.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
 
               {/* Conta de serviço: escolhe uma já cadastrada (sem recolar JSON) ou adiciona nova. */}
               {sheetsSources.length > 0 && !editingConnection && (
@@ -1075,6 +1123,19 @@ export function NewIntegrationModal({
           {step === 1 && provider && provider.id === "evolution" && (
             <>
               <div style={{ fontSize: 13, fontWeight: 500, color: "var(--fg2)", marginBottom: 16 }}>Configuração · {provider.label}</div>
+
+              <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>Cliente (Workspace)</label>
+              <select
+                value={destWorkspaceId}
+                onChange={(e) => setDestWorkspaceId(e.target.value)}
+                disabled={!!defaultWorkspaceId}
+                style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 10, background: "var(--input)", color: "var(--fg)", fontSize: 13, outline: "none", marginBottom: 16, opacity: defaultWorkspaceId ? 0.7 : 1 }}
+              >
+                <option value="" disabled>Selecione o cliente...</option>
+                {workspaces.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
 
               <label style={{ display: "block", fontSize: 12.5, fontWeight: 500, marginBottom: 6 }}>URL da instância</label>
               <input

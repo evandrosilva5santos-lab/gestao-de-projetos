@@ -688,8 +688,14 @@ export async function saveKommoDestination(data: {
   statusId?: string;
   workspaceId?: string;
 }) {
+  // workspace_id é NOT NULL e tem unique key (workspace_id, type) — sem um
+  // workspaceId explícito, o upsert cairia num fallback de "primeiro workspace
+  // do banco" e sobrescreveria silenciosamente a integração de outro cliente.
+  if (!data.workspaceId) {
+    return { success: false, error: "Selecione o cliente (workspace) desta integração." };
+  }
   try {
-    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
+    const workspaceId = data.workspaceId;
 
     const { error } = await supabase
       .from("gestao_leads_destinations")
@@ -851,8 +857,11 @@ export async function saveGoogleSheetsDestination(data: {
   fieldMapping?: Record<string, string>;
   workspaceId?: string;
 }) {
+  if (!data.workspaceId) {
+    return { success: false, error: "Selecione o cliente (workspace) desta integração." };
+  }
   try {
-    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
+    const workspaceId = data.workspaceId;
 
     // Credencial vem do source (catálogo) quando há sourceId; senão do JSON colado.
     let clientEmail = data.clientEmail;
@@ -906,8 +915,11 @@ export async function saveEvolutionDestination(data: {
   groupJid?: string;
   workspaceId?: string;
 }) {
+  if (!data.workspaceId) {
+    return { success: false, error: "Selecione o cliente (workspace) desta integração." };
+  }
   try {
-    const workspaceId = data.workspaceId || (await getOrCreateWorkspaceId());
+    const workspaceId = data.workspaceId;
 
     const { error } = await supabase
       .from("gestao_leads_destinations")
