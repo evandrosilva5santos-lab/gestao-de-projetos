@@ -3,7 +3,38 @@
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 import type { SellerAvailability } from "@/lib/leads/availability";
 import type { QualificationRule } from "@/lib/leads/qualification";
+import { DEFAULT_TEMPLATES, type MessageTemplates } from "@/lib/leads/templates";
 import { fetchKommoUsers } from "@/lib/leads/integrations/kommo";
+
+/**
+ * Templates de mensagem por cliente (cliente + grupo). Ficam na coluna
+ * message_templates de gestao_leads_workspace_rules. Se a coluna ainda não
+ * existir (migration não aplicada) ou não houver nada salvo, cai nos padrões.
+ */
+export async function getMessageTemplates(workspaceId: string) {
+  const { data, error } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .select("message_templates")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error) {
+    // Coluna ausente ou erro de leitura — degrada pro padrão, sem quebrar a UI.
+    return { success: true as const, templates: DEFAULT_TEMPLATES, persisted: false as const };
+  }
+  const stored = (data?.message_templates as MessageTemplates | null) ?? null;
+  return { success: true as const, templates: stored ?? DEFAULT_TEMPLATES, persisted: !!stored };
+}
+
+export async function saveMessageTemplates(workspaceId: string, templates: MessageTemplates) {
+  const { error } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .upsert(
+      { workspace_id: workspaceId, message_templates: templates, updated_at: new Date().toISOString() },
+      { onConflict: "workspace_id" }
+    );
+  if (error) return { success: false as const, error: error.message };
+  return { success: true as const };
+}
 
 /**
  * Responsáveis (usuários) do Kommo do cliente — pra escolher o vendedor por nome

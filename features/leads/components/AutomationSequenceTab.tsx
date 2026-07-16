@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { getAutomationReadiness } from "../actions";
+import { MessageTemplatesEditor } from "./MessageTemplatesEditor";
 
 type Readiness = Awaited<ReturnType<typeof getAutomationReadiness>>;
 
@@ -159,6 +160,9 @@ export function AutomationSequenceTab({ workspaceId }: { workspaceId: string }) 
             desc="Grava o resultado da distribuição em Logs & Automação para rastreabilidade." />
         </div>
       </div>
+
+      {/* Editor de mensagens (templates dinâmicos com variáveis + randomização) */}
+      <MessageTemplatesEditor workspaceId={workspaceId} />
     </div>
   );
 }
