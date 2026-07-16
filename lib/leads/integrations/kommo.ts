@@ -456,3 +456,36 @@ export async function fetchKommoUsers(subdomain: string, token: string): Promise
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+interface KommoAccountResponse {
+  id?: number;
+  name?: string;
+  subdomain?: string;
+}
+
+/**
+ * Valida subdomínio + token batendo em GET /api/v4/account — o endpoint mais
+ * leve da API para confirmar que a credencial é válida (usado pelo botão
+ * "Testar" da integração Kommo).
+ */
+export async function pingKommoAccount(subdomain: string, token: string): Promise<{ success: boolean; accountName?: string; error?: string }> {
+  if (!subdomain || !token) {
+    return { success: false, error: "Subdomínio ou Token não fornecidos" };
+  }
+
+  const baseUrl = `https://${subdomain.toLowerCase().trim()}.kommo.com`;
+  const headers = { Authorization: `Bearer ${token.trim()}`, "Content-Type": "application/json" };
+
+  try {
+    const response = await fetch(`${baseUrl}/api/v4/account`, { method: "GET", headers });
+    if (!response.ok) {
+      if (response.status === 401) return { success: false, error: "Token inválido ou expirado." };
+      const errorText = await response.text();
+      return { success: false, error: `Kommo respondeu ${response.status}: ${errorText.slice(0, 200)}` };
+    }
+    const data = (await response.json()) as KommoAccountResponse;
+    return { success: true, accountName: data.name || data.subdomain || subdomain };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Erro de rede ao contatar o Kommo." };
+  }
+}

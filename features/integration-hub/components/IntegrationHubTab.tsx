@@ -9,6 +9,12 @@ import {
   NewIntegrationModal,
   getDestinations,
   listMetaConnections,
+  testKommoConnection,
+  testSheetsConnection,
+  testEvolutionConnection,
+  testMetaConnection,
+  deleteDestination,
+  deleteMetaConnection,
   type Connection
 } from "@/features/_shared/integrations";
 
@@ -21,6 +27,8 @@ export function IntegrationHubTab() {
   const [connections, setConnections] = useState<Connection[]>(INITIAL_CONNECTIONS);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     async function loadDestinations() {
@@ -127,17 +135,51 @@ export function IntegrationHubTab() {
     }
 
     loadDestinations();
-  }, []);
+  }, [refreshKey]);
 
-  const handleCreate = (connection: Connection) => {
-    // If it's an edit, we might want to reload or replace, but for now just reload list
-    window.location.reload();
+  const handleCreate = () => {
+    setRefreshKey((k) => k + 1);
   };
 
-  const handleAction = (action: string, connection: Connection) => {
-    if (action === "edit") {
+  const handleAction = async (action: string, connection: Connection) => {
+    if (action === "edit" || action === "renew") {
+      // "Renovar token" no Kommo não tem endpoint de renovação automática (token
+      // de longa duração, sem refresh) — a ação honesta é reabrir o editor para
+      // colar um token novo gerado manualmente no Kommo.
       setEditingConnection(connection);
       setModalOpen(true);
+      return;
+    }
+
+    if (action === "test" || action === "sync") {
+      setTestingId(connection.id);
+      const testFn =
+        connection.type === "kommo" ? testKommoConnection :
+        connection.type === "google_sheets" ? testSheetsConnection :
+        connection.type === "evolution" ? testEvolutionConnection :
+        connection.type === "meta" ? testMetaConnection :
+        null;
+      if (!testFn) { setTestingId(null); return; }
+
+      const res = await testFn(connection.id);
+      setTestingId(null);
+      if (res.success) {
+        const detail = "message" in res ? res.message : "forms" in res ? `${res.forms.length} formulário(s) encontrado(s).` : "Conexão validada.";
+        alert(`✅ Conexão OK\n\n${detail}`);
+      } else {
+        alert(`❌ Falha na conexão\n\n${res.error}`);
+      }
+      return;
+    }
+
+    if (action === "disconnect") {
+      if (!confirm(`Desconectar "${connection.name}"? Isso remove a configuração desta integração.`)) return;
+      const res = connection.type === "meta" ? await deleteMetaConnection(connection.id) : await deleteDestination(connection.id);
+      if (!res.success) {
+        alert(`Erro ao desconectar: ${res.error}`);
+        return;
+      }
+      setRefreshKey((k) => k + 1);
     }
   };
 
@@ -173,6 +215,12 @@ export function IntegrationHubTab() {
         <LayersIcon size={16} style={{ flexShrink: 0 }} />
         Conectar (agência) → catalogar (páginas, grupos, planilhas, responsáveis) → vincular ao cliente. O Motor consome o vínculo, sem regra manual.
       </div>
+
+      {testingId && (
+        <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
+          Testando conexão…
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 20 }}>
         {PROVIDERS.map((prov) => {

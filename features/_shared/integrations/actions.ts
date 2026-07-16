@@ -4,7 +4,8 @@ import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 import { fetchMetaPages, fetchMetaForms, fetchMetaAdAccounts } from "@/lib/leads/providers/meta";
 import type { MetaPage } from "@/lib/leads/providers/meta";
 import { listAccessibleSpreadsheets, listSheetTabs } from "@/lib/leads/integrations/sheets";
-import { fetchKommoUsers } from "@/lib/leads/integrations/kommo";
+import { fetchKommoUsers, pingKommoAccount } from "@/lib/leads/integrations/kommo";
+import { fetchSheetHeaders } from "@/lib/leads/integrations/sheets";
 import * as crypto from "crypto";
 
 export async function listWorkspaces() {
@@ -312,6 +313,105 @@ export async function deleteSource(sourceId: string) {
     return { success: false as const, error: error.message };
   }
   return { success: true as const };
+}
+
+/** Remove uma conexão Meta (página vinculada a um cliente) — botão "Desconectar". */
+export async function deleteMetaConnection(connectionId: string) {
+  const { error } = await supabase.from("gestao_leads_meta_connections").delete().eq("id", connectionId);
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+  return { success: true as const };
+}
+
+/** Remove um destino (Kommo/Sheets/Evolution) — botão "Desconectar". */
+export async function deleteDestination(destinationId: string) {
+  const { error } = await supabase.from("gestao_leads_destinations").delete().eq("id", destinationId);
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+  return { success: true as const };
+}
+
+type DestinationConfig = { subdomain?: string; token?: string; clientEmail?: string; privateKey?: string; spreadsheetId?: string; sheetName?: string; url?: string; instanceName?: string };
+
+async function getDestinationConfig(destinationId: string): Promise<{ success: true; config: DestinationConfig } | { success: false; error: string }> {
+  const { data, error } = await supabase
+    .from("gestao_leads_destinations")
+    .select("config")
+    .eq("id", destinationId)
+    .maybeSingle();
+  if (error || !data) {
+    return { success: false, error: "Destino não encontrado." };
+  }
+  return { success: true, config: (data.config || {}) as DestinationConfig };
+}
+
+/** Botão "Testar" — Kommo: valida subdomínio + token batendo em GET /api/v4/account. */
+export async function testKommoConnection(destinationId: string) {
+  const cfg = await getDestinationConfig(destinationId);
+  if (!cfg.success) return { success: false as const, error: cfg.error };
+
+  const res = await pingKommoAccount(cfg.config.subdomain || "", cfg.config.token || "");
+  if (!res.success) return { success: false as const, error: res.error || "Falha ao validar o Kommo." };
+  return { success: true as const, message: `Conectado à conta "${res.accountName}".` };
+}
+
+/** Botão "Testar" — Google Sheets: lê o cabeçalho real da aba configurada. */
+export async function testSheetsConnection(destinationId: string) {
+  const cfg = await getDestinationConfig(destinationId);
+  if (!cfg.success) return { success: false as const, error: cfg.error };
+
+  const res = await fetchSheetHeaders(
+    cfg.config.clientEmail || "",
+    cfg.config.privateKey || "",
+    cfg.config.spreadsheetId || "",
+    cfg.config.sheetName || ""
+  );
+  if (!res.success) return { success: false as const, error: res.error };
+  return { success: true as const, message: `Acesso confirmado. Colunas: ${res.headers.slice(0, 5).join(", ")}${res.headers.length > 5 ? "…" : ""}` };
+}
+
+/** Botão "Testar" — Evolution: bate em GET /instance/fetchInstances (mesma validação de host do sync de grupos). */
+export async function testEvolutionConnection(destinationId: string) {
+  const cfg = await getDestinationConfig(destinationId);
+  if (!cfg.success) return { success: false as const, error: cfg.error };
+
+  const { url, token, instanceName } = cfg.config;
+  if (!url || !token || !instanceName) {
+    return { success: false as const, error: "Configuração incompleta (URL, API Key ou instância)." };
+  }
+
+  let host: URL;
+  try {
+    host = new URL(url);
+  } catch {
+    return { success: false as const, error: "URL da instância inválida." };
+  }
+  if (host.protocol !== "http:" && host.protocol !== "https:") {
+    return { success: false as const, error: "URL deve usar http ou https." };
+  }
+  if (isPrivateOrLoopbackHost(host.hostname)) {
+    return { success: false as const, error: "URL não pode apontar para um host interno/reservado." };
+  }
+
+  try {
+    const res = await fetch(`${host.origin}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`, {
+      headers: { apikey: token },
+    });
+    if (!res.ok) {
+      return { success: false as const, error: `Evolution respondeu ${res.status}.` };
+    }
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : [];
+    if (list.length === 0) {
+      return { success: false as const, error: `Instância "${instanceName}" não encontrada nesse servidor.` };
+    }
+    const state = list[0]?.connectionStatus || list[0]?.instance?.state || "desconhecido";
+    return { success: true as const, message: `Instância "${instanceName}" encontrada — status: ${state}.` };
+  } catch (err) {
+    return { success: false as const, error: err instanceof Error ? err.message : "Erro de rede ao contatar a Evolution." };
+  }
 }
 
 /**

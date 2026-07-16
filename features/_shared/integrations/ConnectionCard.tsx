@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { LockIcon, AlertCircleIcon, PlusIcon } from "@/components/icons/agency-os-icons";
 
 export type ConnectionStatus = "connected" | "disconnected" | "expired";
-export type ActionKey = "test" | "sync" | "renew" | "edit" | "disconnect" | "reconnect";
+export type ActionKey = "test" | "sync" | "renew" | "edit" | "disconnect" | "reconnect" | "audit_leads";
 
 export type Connection = {
   id: string;
@@ -38,7 +38,8 @@ const ACTION_LABEL: Record<ActionKey, string> = {
   renew: "Renovar token",
   edit: "Editar",
   disconnect: "Desconectar",
-  reconnect: "Reconectar"
+  reconnect: "Reconectar",
+  audit_leads: "Auditar Leads"
 };
 
 function ActionButton({ action, onClick }: { action: ActionKey, onClick?: () => void }) {

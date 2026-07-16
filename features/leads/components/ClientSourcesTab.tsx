@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { FacebookIcon } from "@/components/icons/FacebookIcon";
 import { PlusIcon } from "@/components/icons/agency-os-icons";
+import { LeadAuditModal } from "./LeadAuditModal";
 import {
   ConnectionCard,
   NewIntegrationTile,
@@ -10,6 +11,7 @@ import {
   IntegrationPickerDialog,
   listMetaConnections,
   testMetaConnection,
+  deleteMetaConnection,
   type Connection,
   type ActionKey,
   type ProviderId
@@ -46,7 +48,7 @@ export function ClientSourcesTab({ workspaceId }: { workspaceId: string }) {
           maskedToken: `${c.page_id.substring(0, 6)}••••••••••`,
           counts: [{ value: "1", label: "páginas" }],
           syncNote: `Atualizado em ${new Date(c.updated_at).toLocaleDateString()}`,
-          actions: ["test", "sync", "disconnect"],
+          actions: ["audit_leads", "test", "sync", "disconnect"],
           type: "meta"
         }))
       );
@@ -57,7 +59,23 @@ export function ClientSourcesTab({ workspaceId }: { workspaceId: string }) {
     load();
   }, [load]);
 
+  const [auditing, setAuditing] = useState<Connection | null>(null);
+
   const handleAction = async (action: ActionKey, connection: Connection) => {
+    if (action === "audit_leads") {
+      setAuditing(connection);
+      return;
+    }
+    if (action === "disconnect") {
+      if (!confirm(`Desconectar a página "${connection.name}" deste cliente? Ela para de gerar leads.`)) return;
+      const res = await deleteMetaConnection(connection.id);
+      if (!res.success) {
+        alert(`Erro ao desconectar: ${res.error}`);
+        return;
+      }
+      load();
+      return;
+    }
     if (action !== "test" && action !== "sync") return;
     setChecking(connection.id);
     setResult(null);
@@ -121,6 +139,13 @@ export function ClientSourcesTab({ workspaceId }: { workspaceId: string }) {
           }}
           defaultWorkspaceId={workspaceId}
           defaultProviderId={chosenProvider}
+        />
+      )}
+
+      {auditing && (
+        <LeadAuditModal
+          connection={auditing}
+          onClose={() => setAuditing(null)}
         />
       )}
 

@@ -7,6 +7,10 @@ import {
   NewIntegrationTile,
   NewIntegrationModal,
   getDestinationsForWorkspace,
+  testKommoConnection,
+  testSheetsConnection,
+  testEvolutionConnection,
+  deleteDestination,
   type Connection
 } from "@/features/_shared/integrations";
 import { ClientMetaAdAccountsTab } from "./ClientMetaAdAccountsTab";
@@ -16,6 +20,7 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
   const [modalOpen, setModalOpen] = useState(false);
   const [metaModalOpen, setMetaModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     getDestinationsForWorkspace(workspaceId).then((res) => {
@@ -101,7 +106,7 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
     load();
   }, [load]);
 
-  const handleAction = (action: string, connection: Connection) => {
+  const handleAction = async (action: string, connection: Connection) => {
     if (action === "edit") {
       if (connection.type === "meta_ad_accounts") {
         setMetaModalOpen(true);
@@ -109,6 +114,36 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
         setEditingConnection(connection);
         setModalOpen(true);
       }
+      return;
+    }
+
+    if (action === "test") {
+      setTestingId(connection.id);
+      const testFn =
+        connection.type === "kommo" ? testKommoConnection :
+        connection.type === "google_sheets" ? testSheetsConnection :
+        connection.type === "evolution" ? testEvolutionConnection :
+        null;
+      if (!testFn) { setTestingId(null); return; }
+
+      const res = await testFn(connection.id);
+      setTestingId(null);
+      if (res.success) {
+        alert(`✅ Conexão OK\n\n${res.message}`);
+      } else {
+        alert(`❌ Falha na conexão\n\n${res.error}`);
+      }
+      return;
+    }
+
+    if (action === "disconnect") {
+      if (!confirm(`Desconectar "${connection.name}"? Isso remove a configuração — o cliente para de receber por este destino.`)) return;
+      const res = await deleteDestination(connection.id);
+      if (!res.success) {
+        alert(`Erro ao desconectar: ${res.error}`);
+        return;
+      }
+      load();
     }
   };
 
@@ -132,6 +167,12 @@ export function ClientDestinationsTab({ workspaceId }: { workspaceId: string }) 
           Novo destino
         </button>
       </div>
+
+      {testingId && (
+        <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--muted)" }}>
+          Testando conexão…
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 15, marginTop: 18 }} className="!grid-cols-1 md:!grid-cols-2">
         {connections.map((connection) => (
