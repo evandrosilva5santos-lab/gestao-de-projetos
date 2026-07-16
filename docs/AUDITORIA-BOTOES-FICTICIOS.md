@@ -128,20 +128,26 @@ função delas.
 
 ## 🛠️ Prioridade de correção sugerida
 
-1. **Ligar os `handleAction` do Hub e de Destinos.** É o fix de maior impacto/menor
-   esforço: trocar o `if (action === "edit")` por um `switch` que também trata
-   `"test"` → chama a função de teste do provedor, e `"disconnect"` → chama
-   `deleteSource()` (que já existe e já é real, só precisa ser conectada).
-2. **Faltam as funções de "Testar" para Kommo/Sheets/Evolution.** Hoje só existe
-   `testMetaConnection`. Não basta ligar o fio — é preciso criar
-   `testKommoConnection` (bater em `GET /api/v4/account`), `testSheetsConnection`
-   (tentar ler a planilha) e `testEvolutionConnection` (bater em
-   `GET /instance/fetchInstances`) em `features/_shared/integrations/actions.ts`.
-3. **Decidir o destino do fluxo "Google" no wizard.** Hoje é 100% mock e pode enganar
-   quem tentar usar. Ou implementa de verdade (OAuth Google Ads/Lead Forms), ou remove
-   a opção do seletor até estar pronta.
-4. **Botões órfãos "Novo Lead" e "Sair".** Implementar ou remover — hoje enganam o
-   usuário por estarem visíveis e clicáveis sem fazer nada.
-5. **Busca automática de pipelines do Kommo.** Não é bug, é gap de produto — já mapeado
-   como Fase 3 do Integration Intelligence (`docs/SPEC-KOMMO-UPSERT.md`).
-6. **Limpeza:** remover `MetaConnectionsTab.tsx` (código morto, sem uso).
+1. ✅ **Ligar os `handleAction` do Hub e de Destinos.** — commit `016b868`.
+   `handleAction` agora trata `test`/`disconnect`/`renew`, ligados às Server
+   Actions reais (`deleteDestination`, `deleteMetaConnection`, `testKommoConnection`,
+   `testSheetsConnection`, `testEvolutionConnection`, `testMetaConnection`).
+2. ✅ **Funções de "Testar" para Kommo/Sheets/Evolution.** — commit `016b868`.
+   `pingKommoAccount` (`GET /api/v4/account`), `testSheetsConnection` (lê o
+   cabeçalho real da aba) e `testEvolutionConnection` (`GET /instance/fetchInstances`)
+   criadas em `lib/leads/integrations/kommo.ts` / `features/_shared/integrations/actions.ts`.
+3. ✅ **Fluxo "Google" no wizard.** — commit `849a63e`. Decisão: remover (era 100%
+   mock — OAuth fake, selects sem `onChange`, `MOCK_FORMS` hardcoded) até estar
+   pronto de verdade, em vez de deixar enganando o usuário.
+4. ✅ **Botões órfãos "Novo Lead" e "Sair".** — commit `849a63e`. Removidos (sem
+   `onClick`, decorativos).
+5. ✅ **Busca automática de pipelines do Kommo.** — commit `c97bdb5`.
+   `fetchKommoPipelines` (`GET /api/v4/leads/pipelines`) substitui os campos de
+   texto "Pipeline ID"/"Status ID" por dois `<select>` com nomes reais (com
+   fallback manual). Filtra apenas os status `142`/`143` ("Fechado - ganho/perdido"
+   — IDs fixos e universais em qualquer pipeline do Kommo, confirmado contra a
+   conta real da Karol), mantendo a etapa de entrada disponível como opção.
+6. ✅ **Limpeza:** `MetaConnectionsTab.tsx` removido. — commit `849a63e`.
+
+**Todos os 6 itens desta lista estão resolvidos.** Próximos passos possíveis ficam
+a critério do produto — não há mais nenhum botão fictício mapeado nesta auditoria.
