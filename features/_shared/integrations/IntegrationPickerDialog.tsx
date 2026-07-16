@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 // Mantido local (não importado do NewIntegrationModal) para o picker compilar de
 // forma independente. Deve espelhar o union ProviderId do NewIntegrationModal.
-export type ProviderId = "meta" | "google" | "sheets" | "kommo" | "evolution";
+export type ProviderId = "meta" | "sheets" | "kommo" | "evolution";
 
 type ProviderOption = {
   id: ProviderId;
@@ -22,7 +22,6 @@ type ProviderOption = {
 
 const PROVIDERS: ProviderOption[] = [
   { id: "meta", label: "Meta Business", description: "Facebook / Instagram Lead Ads", iconBg: "#0866FF", icon: <FacebookIcon className="w-5 h-5" /> },
-  { id: "google", label: "Google", description: "Google Ads / Lead Forms", iconBg: "#EA4335", icon: <span style={{ fontWeight: 700, fontSize: 16, color: "#fff" }}>G</span> },
   { id: "sheets", label: "Google Sheets", description: "Planilha de destino dos leads", iconBg: "#0f9d58", icon: <span style={{ fontWeight: 700, fontSize: 13, color: "#fff" }}>GS</span> },
   { id: "kommo", label: "Kommo CRM", description: "Enviar leads para o pipeline", iconBg: "#00a6ff", icon: <span style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>k</span> },
   { id: "evolution", label: "Evolution API", description: "WhatsApp (grupo / vendedor)", iconBg: "#25d366", icon: <span style={{ fontWeight: 700, fontSize: 12, color: "#fff" }}>Ev</span> }

@@ -5,8 +5,8 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { agencyOsThemeVars } from "@/lib/themes/agency-os";
 import {
   LogoIcon, MotorIcon, CentralIcon, DashboardIcon,
-  ClientesIcon, GearIcon, LogsIcon, LogoutIcon, MenuIcon,
-  SunIcon, MoonIcon, UserPlusIcon
+  ClientesIcon, GearIcon, LogsIcon, MenuIcon,
+  SunIcon, MoonIcon
 } from "@/components/icons/agency-os-icons";
 import { OverviewTab } from "./OverviewTab";
 import { ClientsListScreen } from "./ClientsListScreen";
@@ -240,12 +240,6 @@ export function LeadsDashboardShell() {
                   <span style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap" }}>Admin</span>
                   <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>Agência Mega</span>
                 </div>
-                <button
-                  title="Sair"
-                  style={{ width: 30, height: 30, flexShrink: 0, border: "none", background: "transparent", color: "var(--muted)", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-                >
-                  <LogoutIcon size={16} />
-                </button>
               </>
             )}
           </div>
@@ -284,12 +278,6 @@ export function LeadsDashboardShell() {
               style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", background: "var(--card)", borderRadius: 9, cursor: "pointer", color: "var(--fg2)" }}
             >
               {dark ? <MoonIcon size={17} /> : <SunIcon size={17} />}
-            </button>
-            <button
-              style={{ height: 36, display: "inline-flex", alignItems: "center", gap: 7, padding: "0 13px", border: "none", background: "var(--accent)", color: "#fff", borderRadius: 9, fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}
-            >
-              <UserPlusIcon size={16} />
-              Novo Lead
             </button>
           </header>
 
