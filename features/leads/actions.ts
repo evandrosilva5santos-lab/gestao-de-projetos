@@ -193,6 +193,57 @@ export async function passarVez(sellerId: string) {
   return { success: true as const };
 }
 
+/**
+ * Dados de apoio da tela Rodada da Vez que não vêm de getAllSellersQueue:
+ * "Leads hoje" por vendedor + "Últimas atribuições". Um round-trip só.
+ */
+export async function getDistributionExtras(workspaceId: string) {
+  // Início do dia em America/Sao_Paulo (mesma convenção do resto do módulo).
+  const spDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date()); // ex.: "2026-07-15"
+  const startOfDayIso = `${spDate}T00:00:00-03:00`;
+
+  const [todayRes, recentRes] = await Promise.all([
+    supabase
+      .from("gestao_leads")
+      .select("seller_id")
+      .eq("workspace_id", workspaceId)
+      .gte("created_at", startOfDayIso)
+      .not("seller_id", "is", null),
+    supabase
+      .from("gestao_leads")
+      .select("id, name, source, status, created_at, seller_id, gestao_leads_sellers(name)")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false })
+      .limit(8),
+  ]);
+
+  const leadsTodayBySeller: Record<string, number> = {};
+  for (const row of todayRes.data ?? []) {
+    const sid = (row as { seller_id: string | null }).seller_id;
+    if (sid) leadsTodayBySeller[sid] = (leadsTodayBySeller[sid] ?? 0) + 1;
+  }
+
+  const recentAssignments = (recentRes.data ?? []).map((r) => {
+    const rel = (r as { gestao_leads_sellers?: { name: string } | { name: string }[] | null }).gestao_leads_sellers;
+    const sellerName = Array.isArray(rel) ? rel[0]?.name : rel?.name;
+    return {
+      id: r.id as string,
+      leadName: r.name as string,
+      sellerName: sellerName ?? null,
+      source: r.source as string,
+      status: r.status as string,
+      createdAt: r.created_at as string,
+    };
+  });
+
+  return { success: true as const, leadsTodayBySeller, recentAssignments };
+}
+
 export async function toggleSellerActive(sellerId: string, isActive: boolean) {
   const { error } = await supabase
     .from("gestao_leads_sellers")
