@@ -11,11 +11,38 @@ import {
   toggleSellerActive,
   createSeller,
   updateSeller,
-  deleteSeller
+  deleteSeller,
+  getWorkspaceRules,
+  updateWorkspaceRules
 } from "../actions";
+import { isSellerAvailable, WEEKDAY_LABELS, type SellerAvailability } from "@/lib/leads/availability";
+import type { QualificationRule, QualificationCriterion } from "@/lib/leads/qualification";
 
-type Seller = { id: string; name: string; phone: string | null; email: string | null; crmUserId: string | null; isActive: boolean; lastAssignedAt: string | null };
+type Seller = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  crmUserId: string | null;
+  isActive: boolean;
+  lastAssignedAt: string | null;
+  availability: SellerAvailability;
+};
 type Group = { workspaceId: string; workspaceName: string; sellers: Seller[] };
+
+type WorkspaceRules = {
+  respectHours: boolean;
+  skipUnavailable: boolean;
+  queuePaused: boolean;
+  qualification: QualificationRule;
+};
+
+const QUALIFICATION_OPTIONS: { value: QualificationCriterion; label: string; hint: string }[] = [
+  { value: "has_phone", label: "Tem telefone", hint: "Só entra na Rodada quem informou telefone." },
+  { value: "has_email", label: "Tem e-mail", hint: "Só entra na Rodada quem informou e-mail." },
+  { value: "field_equals", label: "Campo do formulário", hint: 'Ex.: só quem respondeu "quero orçamento".' },
+  { value: "utm_source", label: "Origem / campanha (UTM)", hint: "Ex.: só leads de uma campanha específica." },
+];
 
 function relativeTime(iso: string | null): string {
   if (!iso) return "Nunca atendeu";
@@ -29,8 +56,15 @@ function relativeTime(iso: string | null): string {
   return `Há ${days} dia(s)`;
 }
 
-type SellerForm = { name: string; phone: string; crmUserId: string };
-const emptyForm: SellerForm = { name: "", phone: "", crmUserId: "" };
+type SellerForm = { name: string; phone: string; crmUserId: string; availability: SellerAvailability };
+const emptyForm: SellerForm = { name: "", phone: "", crmUserId: "", availability: {} };
+
+const defaultRules: WorkspaceRules = {
+  respectHours: false,
+  skipUnavailable: true,
+  queuePaused: false,
+  qualification: { enabled: false },
+};
 
 export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -43,6 +77,34 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
   const [form, setForm] = useState<SellerForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Regras da rodada (disponibilidade) + Qualificação de leads — por cliente.
+  const [rules, setRules] = useState<WorkspaceRules>(defaultRules);
+  const [rulesLoading, setRulesLoading] = useState(false);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let mounted = true;
+    getWorkspaceRules(workspaceId).then((res) => {
+      if (mounted && res.success) setRules(res.rules);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [workspaceId]);
+
+  const patchRules = async (patch: Partial<WorkspaceRules>) => {
+    if (!workspaceId) return;
+    const next = { ...rules, ...patch };
+    setRules(next); // otimista — mesmo padrão dos toggles de vendedor
+    setRulesLoading(true);
+    const res = await updateWorkspaceRules(workspaceId, patch);
+    setRulesLoading(false);
+    if (!res.success) {
+      alert("Erro ao salvar regra: " + res.error);
+      setRules(rules); // reverte
+    }
+  };
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -129,7 +191,7 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
 
   const openEdit = (seller: Seller) => {
     setEditingId(seller.id);
-    setForm({ name: seller.name, phone: seller.phone || "", crmUserId: "" });
+    setForm({ name: seller.name, phone: seller.phone || "", crmUserId: "", availability: seller.availability ?? {} });
     setFormError(null);
     setModalOpen(true);
   };
@@ -142,7 +204,7 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
     setSaving(true);
     setFormError(null);
     const res = editingId
-      ? await updateSeller(editingId, { name: form.name, phone: form.phone, crmUserId: form.crmUserId })
+      ? await updateSeller(editingId, { name: form.name, phone: form.phone, crmUserId: form.crmUserId, availability: form.availability })
       : await createSeller({
           workspaceId: workspaceId!,
           name: form.name,
@@ -242,6 +304,7 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                     </TableHead>
                     <TableHead>Vendedor</TableHead>
                     <TableHead>WhatsApp</TableHead>
+                    <TableHead>Disponibilidade</TableHead>
                     <TableHead>Último Lead Recebido</TableHead>
                     <TableHead>Fila (Ordem)</TableHead>
                     <TableHead>Status da Fila</TableHead>
@@ -275,6 +338,13 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                           )}
                         </TableCell>
                         <TableCell className="text-slate-500 font-mono text-sm">{seller.phone || "—"}</TableCell>
+                        <TableCell>
+                          {isSellerAvailable(seller.availability, rules) ? (
+                            <Badge variant="outline" className="border-emerald-200 text-emerald-700 bg-emerald-50">Disponível agora</Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-slate-200 text-slate-500 bg-slate-50">Indisponível</Badge>
+                          )}
+                        </TableCell>
                         <TableCell className="text-slate-600">{relativeTime(seller.lastAssignedAt)}</TableCell>
                         <TableCell>
                           {seller.isActive ? (
@@ -320,7 +390,7 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                   })}
                   {group.sellers.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-8 text-center text-slate-400">
+                      <TableCell colSpan={8} className="py-8 text-center text-slate-400">
                         Nenhum vendedor nesta fila. Clique em “Adicionar vendedor” para começar.
                       </TableCell>
                     </TableRow>
@@ -331,6 +401,138 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
           </Card>
         );
       })}
+
+      {workspaceId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Regras da rodada</CardTitle>
+            <CardDescription>
+              <b>Disponibilidade</b> é a regra principal: só entra na vez quem está disponível agora
+              (sem pausa, sem férias, no dia e horário de atendimento). Configure dias/horário/férias
+              de cada vendedor no botão de editar da tabela acima.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <RuleToggleRow
+              title="Pular indisponível"
+              description="Vendedor pausado, de férias ou fora do dia de atendimento não entra na vez."
+              checked={rules.skipUnavailable}
+              disabled={rulesLoading}
+              onChange={(v) => patchRules({ skipUnavailable: v })}
+            />
+            <RuleToggleRow
+              title="Respeitar horário de atendimento"
+              description="Fora do horário configurado do vendedor, pula para o próximo disponível."
+              checked={rules.respectHours}
+              disabled={rulesLoading}
+              onChange={(v) => patchRules({ respectHours: v })}
+            />
+            <RuleToggleRow
+              title="Pausar entrada de novos leads"
+              description="Segura a fila inteira deste cliente sem perder a ordem atual."
+              checked={rules.queuePaused}
+              disabled={rulesLoading}
+              onChange={(v) => patchRules({ queuePaused: v })}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {workspaceId && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Qualificação de leads</CardTitle>
+                <CardDescription>Só leads qualificados entram na Rodada da Vez. Escolha o critério.</CardDescription>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-slate-300 accent-indigo-600 cursor-pointer"
+                  checked={rules.qualification.enabled}
+                  disabled={rulesLoading}
+                  onChange={(e) =>
+                    patchRules({ qualification: { ...rules.qualification, enabled: e.target.checked } })
+                  }
+                />
+                <span className="text-sm font-medium text-slate-700">Ativa</span>
+              </label>
+            </div>
+          </CardHeader>
+          {rules.qualification.enabled && (
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {QUALIFICATION_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() =>
+                      patchRules({
+                        qualification: { ...rules.qualification, criterion: opt.value, config: rules.qualification.config ?? {} },
+                      })
+                    }
+                    className={`text-left p-3 rounded-lg border transition-colors ${
+                      rules.qualification.criterion === opt.value
+                        ? "border-indigo-400 bg-indigo-50"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="text-sm font-semibold text-slate-800">{opt.label}</div>
+                    <div className="text-xs text-slate-500 mt-1">{opt.hint}</div>
+                  </button>
+                ))}
+              </div>
+
+              {rules.qualification.criterion === "field_equals" && (
+                <div className="flex flex-wrap items-center gap-2 p-3 border border-dashed border-slate-300 rounded-lg">
+                  <span className="text-xs font-medium text-slate-600">Campo</span>
+                  <input
+                    className="h-9 px-2.5 border border-slate-300 rounded-md text-sm flex-1 min-w-[140px]"
+                    placeholder="ex: interesse"
+                    value={rules.qualification.config?.field || ""}
+                    onChange={(e) =>
+                      patchRules({
+                        qualification: { ...rules.qualification, config: { ...rules.qualification.config, field: e.target.value } },
+                      })
+                    }
+                  />
+                  <span className="text-xs font-medium text-slate-600">é igual a</span>
+                  <input
+                    className="h-9 px-2.5 border border-slate-300 rounded-md text-sm flex-1 min-w-[140px]"
+                    placeholder="ex: quero orçamento"
+                    value={rules.qualification.config?.equals || ""}
+                    onChange={(e) =>
+                      patchRules({
+                        qualification: { ...rules.qualification, config: { ...rules.qualification.config, equals: e.target.value } },
+                      })
+                    }
+                  />
+                </div>
+              )}
+
+              {rules.qualification.criterion === "utm_source" && (
+                <div className="flex flex-wrap items-center gap-2 p-3 border border-dashed border-slate-300 rounded-lg">
+                  <span className="text-xs font-medium text-slate-600">utm_source igual a</span>
+                  <input
+                    className="h-9 px-2.5 border border-slate-300 rounded-md text-sm flex-1 min-w-[140px]"
+                    placeholder="ex: facebook-ads"
+                    value={rules.qualification.config?.value || ""}
+                    onChange={(e) =>
+                      patchRules({
+                        qualification: { ...rules.qualification, config: { ...rules.qualification.config, value: e.target.value } },
+                      })
+                    }
+                  />
+                </div>
+              )}
+
+              <div className="text-xs text-slate-500">
+                Leads reprovados são salvos com status <b>não qualificado</b> — não entram na fila nem geram notificação ao vendedor.
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {showEmptyClientCard && (
         <Card>
@@ -424,6 +626,102 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
                 </span>
               </label>
 
+              <div style={{ borderTop: "1px solid #eee", paddingTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#334155", letterSpacing: ".02em" }}>DISPONIBILIDADE</span>
+
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 500, color: "#334155", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!!form.availability.paused}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, availability: { ...f.availability, paused: e.target.checked } }))
+                    }
+                  />
+                  Pausar entrada de novos leads para este vendedor
+                </label>
+
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
+                    Dias de atendimento <span style={{ fontWeight: 400, color: "#94a3b8" }}>(nenhum marcado = todo dia)</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {WEEKDAY_LABELS.map((label, idx) => {
+                      const active = (form.availability.weekdays ?? []).includes(idx);
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() =>
+                            setForm((f) => {
+                              const current = f.availability.weekdays ?? [];
+                              const next = current.includes(idx) ? current.filter((d) => d !== idx) : [...current, idx];
+                              return { ...f, availability: { ...f.availability, weekdays: next } };
+                            })
+                          }
+                          style={{
+                            flex: 1,
+                            height: 32,
+                            border: "none",
+                            borderRadius: 6,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            background: active ? "#4f46e5" : "#f1f5f9",
+                            color: active ? "#fff" : "#64748b"
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 13, fontWeight: 600, color: "#334155" }}>
+                  Horário de atendimento <span style={{ fontWeight: 400, color: "#94a3b8", fontSize: 11.5 }}>(vazio = 24h — só aplica se "Respeitar horário" estiver ligado nas Regras da rodada)</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="time"
+                      value={form.availability.hours?.start || ""}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, availability: { ...f.availability, hours: { ...f.availability.hours, start: e.target.value } } }))
+                      }
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <input
+                      type="time"
+                      value={form.availability.hours?.end || ""}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, availability: { ...f.availability, hours: { ...f.availability.hours, end: e.target.value } } }))
+                      }
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                  </div>
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 13, fontWeight: 600, color: "#334155" }}>
+                  Férias / ausência <span style={{ fontWeight: 400, color: "#94a3b8", fontSize: 11.5 }}>(opcional)</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="date"
+                      value={form.availability.vacation?.from || ""}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, availability: { ...f.availability, vacation: { ...f.availability.vacation, from: e.target.value } } }))
+                      }
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <input
+                      type="date"
+                      value={form.availability.vacation?.to || ""}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, availability: { ...f.availability, vacation: { ...f.availability.vacation, to: e.target.value } } }))
+                      }
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                  </div>
+                </label>
+              </div>
+
               {formError && <p style={{ margin: 0, color: "#e11d48", fontSize: 13 }}>{formError}</p>}
             </div>
 
@@ -458,3 +756,45 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
   outline: "none"
 };
+
+function RuleToggleRow({
+  title,
+  description,
+  checked,
+  disabled,
+  onChange
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <div className="text-sm font-medium text-slate-800">{title}</div>
+        <div className="text-xs text-slate-500 mt-0.5">{description}</div>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className="flex-shrink-0"
+        style={{
+          width: 42,
+          height: 24,
+          border: "none",
+          borderRadius: 9999,
+          background: checked ? "#4f46e5" : "#e2e8f0",
+          padding: 3,
+          display: "flex",
+          cursor: disabled ? "wait" : "pointer",
+          justifyContent: checked ? "flex-end" : "flex-start"
+        }}
+      >
+        <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff", display: "block" }} />
+      </button>
+    </div>
+  );
+}

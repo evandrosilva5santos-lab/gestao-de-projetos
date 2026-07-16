@@ -1,6 +1,8 @@
 "use server";
 
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
+import type { SellerAvailability } from "@/lib/leads/availability";
+import type { QualificationRule } from "@/lib/leads/qualification";
 
 /**
  * Nome de um workspace a partir do id na URL (?workspace=id) — usado pra
@@ -129,6 +131,7 @@ type SellerQueueRaw = {
   is_active: boolean;
   last_assigned_at: string | null;
   workspace_id: string;
+  availability: SellerAvailability;
   core_workspaces: { name: string } | { name: string }[] | null;
 }
 
@@ -136,7 +139,7 @@ type SellerQueueRaw = {
 export async function getAllSellersQueue() {
   const { data, error } = await supabase
     .from("gestao_leads_sellers")
-    .select("id, name, phone, email, crm_user_id, is_active, last_assigned_at, workspace_id, core_workspaces(name)")
+    .select("id, name, phone, email, crm_user_id, is_active, last_assigned_at, workspace_id, availability, core_workspaces(name)")
     .order("last_assigned_at", { ascending: true, nullsFirst: true });
 
   if (error) {
@@ -168,6 +171,7 @@ export async function getAllSellersQueue() {
       crmUserId: s.crm_user_id,
       isActive: s.is_active,
       lastAssignedAt: s.last_assigned_at,
+      availability: s.availability ?? {},
     })),
   }));
 
@@ -225,7 +229,7 @@ export async function createSeller(input: {
 
 export async function updateSeller(
   sellerId: string,
-  input: { name?: string; phone?: string | null; crmUserId?: string | null }
+  input: { name?: string; phone?: string | null; crmUserId?: string | null; availability?: SellerAvailability }
 ) {
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) {
@@ -235,11 +239,60 @@ export async function updateSeller(
   }
   if (input.phone !== undefined) patch.phone = input.phone?.trim() || null;
   if (input.crmUserId !== undefined) patch.crm_user_id = input.crmUserId?.trim() || null;
+  if (input.availability !== undefined) patch.availability = input.availability;
 
   const { error } = await supabase.from("gestao_leads_sellers").update(patch).eq("id", sellerId);
   if (error) {
     return { success: false as const, error: error.message };
   }
+  return { success: true as const };
+}
+
+/**
+ * Regras da Rodada + Qualificação, por cliente (ver migration
+ * 20260715130000_seller_availability_and_qualification.sql). Sem linha ainda
+ * = defaults do protótipo (skipUnavailable ligado, resto desligado).
+ */
+export async function getWorkspaceRules(workspaceId: string) {
+  const { data, error } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .select("respect_hours, skip_unavailable, queue_paused, qualification")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (error) return { success: false as const, error: error.message };
+
+  return {
+    success: true as const,
+    rules: {
+      respectHours: data?.respect_hours ?? false,
+      skipUnavailable: data?.skip_unavailable ?? true,
+      queuePaused: data?.queue_paused ?? false,
+      qualification: (data?.qualification as QualificationRule | null) ?? { enabled: false },
+    },
+  };
+}
+
+export async function updateWorkspaceRules(
+  workspaceId: string,
+  patch: Partial<{
+    respectHours: boolean;
+    skipUnavailable: boolean;
+    queuePaused: boolean;
+    qualification: QualificationRule;
+  }>
+) {
+  const row: Record<string, unknown> = { workspace_id: workspaceId, updated_at: new Date().toISOString() };
+  if (patch.respectHours !== undefined) row.respect_hours = patch.respectHours;
+  if (patch.skipUnavailable !== undefined) row.skip_unavailable = patch.skipUnavailable;
+  if (patch.queuePaused !== undefined) row.queue_paused = patch.queuePaused;
+  if (patch.qualification !== undefined) row.qualification = patch.qualification;
+
+  const { error } = await supabase
+    .from("gestao_leads_workspace_rules")
+    .upsert(row, { onConflict: "workspace_id" });
+
+  if (error) return { success: false as const, error: error.message };
   return { success: true as const };
 }
 

@@ -3,6 +3,7 @@ import { supabaseAdmin } from "../supabase/client";
 import { sendLeadToKommo } from "../leads/integrations/kommo";
 import { appendLeadToSheets } from "../leads/integrations/sheets";
 import { sendLeadToWhatsApp } from "../leads/integrations/evolution";
+import { isLeadQualified, type QualificationRule } from "../leads/qualification";
 
 // Função auxiliar para normalizar o telefone no formato brasileiro
 function normalizePhone(rawPhone: string): string {
@@ -137,8 +138,31 @@ export const processNewLead = inngest.createFunction(
     const isReturningLead = !!returningLeadInfo.stickySellerId;
     const reentryCount = returningLeadInfo.previousCount; // 0 = primeira vez deste lead
 
+    // 3.5. Qualificação — só leads que passam no critério configurado (por
+    // cliente) entram na Rodada da Vez. Sem regra ativa, todo lead passa
+    // (comportamento atual preservado). Reentrada com vendedor sticky ignora
+    // qualificação: a pessoa já foi qualificada da primeira vez.
+    const isQualified = await step.run("check-qualification", async () => {
+      if (returningLeadInfo.stickySellerId) return true;
+
+      const { data } = await supabaseAdmin
+        .from("gestao_leads_workspace_rules")
+        .select("qualification")
+        .eq("workspace_id", workspaceId)
+        .maybeSingle();
+
+      const rule = (data?.qualification ?? { enabled: false }) as QualificationRule;
+      return isLeadQualified(
+        { phone: treatedData.phone, email: treatedData.email, custom: rawPayload },
+        rule
+      );
+    });
+
     // 4. Distribuição Round Robin Atômica (caso não seja reentrada com vendedor ativo)
     const assignedSellerId = await step.run("execute-distribution", async () => {
+      // Reprovado na qualificação: nunca entra na Rodada, não gasta vez de ninguém.
+      if (!isQualified) return null;
+
       // Reentrada com vendedor ainda ativo: mantém o mesmo vendedor
       if (returningLeadInfo.stickySellerId) return returningLeadInfo.stickySellerId;
 
@@ -171,7 +195,7 @@ export const processNewLead = inngest.createFunction(
           email: treatedData.email,
           phone: treatedData.phone,
           source: source,
-          status: assignedSellerId ? "distributed" : "error",
+          status: assignedSellerId ? "distributed" : isQualified ? "error" : "not_qualified",
           seller_id: assignedSellerId,
           leadgen_id: treatedData.leadgenId,
           raw_data: {
