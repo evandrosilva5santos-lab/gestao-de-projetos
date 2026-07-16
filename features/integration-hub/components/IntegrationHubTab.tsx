@@ -141,13 +141,23 @@ export function IntegrationHubTab() {
     }
   };
 
+  // Organização por PROVEDOR (não mais por cliente): cada seção é um tipo de
+  // conexão. Ver arquitetura do menu Configurações — conectar uma vez, vincular
+  // ao cliente depois.
+  const PROVIDERS: { type: Connection["type"]; label: string; sub: string; icon: string; iconBg: string }[] = [
+    { type: "evolution", label: "WhatsApp · Evolution", sub: "Instância + grupos catalogados", icon: "Ev", iconBg: "#25d366" },
+    { type: "kommo", label: "Kommo CRM", sub: "Conta + responsáveis", icon: "k", iconBg: "#00a6ff" },
+    { type: "google_sheets", label: "Planilhas · Google Sheets", sub: "Service account + planilhas", icon: "GS", iconBg: "#0f9d58" },
+    { type: "meta", label: "Meta · Business Manager", sub: "Páginas, formulários e contas de anúncio", icon: "f", iconBg: "#0866FF" },
+  ];
+
   return (
     <>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-.025em", color: "var(--fg)" }}>Central de Integrações</h1>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-.025em", color: "var(--fg)" }}>Integrações</h1>
           <p style={{ margin: "5px 0 0", color: "var(--muted)", fontSize: 15, maxWidth: 740 }}>
-            Cadastre a conexão uma vez, no nível do sistema. Os workspaces apenas consomem — sem duplicar token, sem cadastrar ID na mão.
+            Cadastre a conexão uma vez, no nível da agência. Os clientes apenas consomem — sem duplicar token, sem cadastrar ID na mão.
           </p>
         </div>
         <button
@@ -161,32 +171,41 @@ export function IntegrationHubTab() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 15px", borderRadius: 11, background: "var(--soft-bg)", color: "var(--soft-fg)", fontSize: 12.5, fontWeight: 500, lineHeight: 1.5, marginTop: 20 }}>
         <LayersIcon size={16} style={{ flexShrink: 0 }} />
-        Agency OS → Central de Integrações (token) → N páginas/formulários → cada formulário mapeado a 1 Workspace. O Motor roteia pelo Form ID, sem regra manual.
+        Conectar (agência) → catalogar (páginas, grupos, planilhas, responsáveis) → vincular ao cliente. O Motor consome o vínculo, sem regra manual.
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 20 }}>
-        {Object.entries(
-          connections.reduce((acc, curr) => {
-            const wsId = curr.workspaceId || "unknown";
-            if (!acc[wsId]) acc[wsId] = { name: curr.workspaceName || "Sem Cliente", items: [] };
-            acc[wsId].items.push(curr);
-            return acc;
-          }, {} as Record<string, { name: string; items: Connection[] }>)
-        ).map(([wsId, group]) => (
-          <details key={wsId} style={{ background: "var(--card-bg)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }} open>
-            <summary style={{ padding: "16px 20px", fontWeight: 600, fontSize: 16, cursor: "pointer", borderBottom: "1px solid var(--border)", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span className="flex items-center gap-2">
-                <span className="text-slate-800 dark:text-slate-200">{group.name}</span>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">{group.items.length}</span>
-              </span>
-            </summary>
-            <div style={{ padding: "20px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 15 }} className="!grid-cols-1 md:!grid-cols-2 bg-slate-50/50 dark:bg-slate-900/50">
-              {group.items.map((connection) => (
-                <ConnectionCard key={connection.id} connection={connection} onAction={handleAction} />
-              ))}
+        {PROVIDERS.map((prov) => {
+          const items = connections.filter((c) => c.type === prov.type);
+          const distinctClients = new Set(items.map((c) => c.workspaceName || c.workspaceId)).size;
+          return (
+            <div key={prov.type} style={{ background: "var(--card-bg)", borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ width: 34, height: 34, borderRadius: 9, background: prov.iconBg, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
+                  {prov.icon}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15.5, color: "var(--fg)" }}>{prov.label}</div>
+                  <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{prov.sub}</div>
+                </div>
+                <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500" style={{ whiteSpace: "nowrap" }}>
+                  {items.length === 0 ? "Nenhuma conexão" : `${items.length} conexão(ões) · ${distinctClients} cliente(s)`}
+                </span>
+              </div>
+              <div style={{ padding: 20, display: "grid", gap: 15 }} className="!grid-cols-1 md:!grid-cols-2 bg-slate-50/50 dark:bg-slate-900/50">
+                {items.length === 0 ? (
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <NewIntegrationTile onClick={() => { setEditingConnection(null); setModalOpen(true); }} />
+                  </div>
+                ) : (
+                  items.map((connection) => (
+                    <ConnectionCard key={connection.id} connection={connection} onAction={handleAction} />
+                  ))
+                )}
+              </div>
             </div>
-          </details>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 15 }} className="!grid-cols-1 md:!grid-cols-2">
@@ -194,9 +213,9 @@ export function IntegrationHubTab() {
       </div>
 
       {modalOpen && (
-        <NewIntegrationModal 
-          onClose={() => { setModalOpen(false); setEditingConnection(null); }} 
-          onCreate={handleCreate} 
+        <NewIntegrationModal
+          onClose={() => { setModalOpen(false); setEditingConnection(null); }}
+          onCreate={handleCreate}
           editingConnection={editingConnection}
         />
       )}
