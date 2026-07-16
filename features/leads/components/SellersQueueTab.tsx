@@ -15,7 +15,8 @@ import {
   getWorkspaceRules,
   updateWorkspaceRules,
   passarVez,
-  getDistributionExtras
+  getDistributionExtras,
+  getKommoResponsibles
 } from "../actions";
 import { isSellerAvailable, WEEKDAY_LABELS, type SellerAvailability } from "@/lib/leads/availability";
 import type { QualificationRule, QualificationCriterion } from "@/lib/leads/qualification";
@@ -126,6 +127,12 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
   const [leadsToday, setLeadsToday] = useState<Record<string, number>>({});
   const [recent, setRecent] = useState<RecentAssignment[]>([]);
 
+  // Responsáveis do Kommo (buscados uma vez que o Kommo do cliente está conectado)
+  // — pra escolher o vendedor por nome em vez de digitar o ID na mão.
+  const [kommoUsers, setKommoUsers] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [kommoConnected, setKommoConnected] = useState(false);
+  const [manualKommoId, setManualKommoId] = useState(false);
+
   const fetchGroups = useCallback(() => {
     getAllSellersQueue().then((res) => {
       setLoading(false);
@@ -143,6 +150,15 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
       if (res.success) {
         setLeadsToday(res.leadsTodayBySeller);
         setRecent(res.recentAssignments);
+      }
+    });
+    getKommoResponsibles(workspaceId).then((res) => {
+      if (res.success && res.connected) {
+        setKommoConnected(true);
+        setKommoUsers(res.users);
+      } else {
+        setKommoConnected(false);
+        setKommoUsers([]);
       }
     });
   }, [workspaceId]);
@@ -661,9 +677,46 @@ export function SellersQueueTab({ workspaceId }: { workspaceId?: string } = {}) 
               <span style={hintStyle}>Usado para notificar o vendedor no privado quando ele recebe um lead.</span>
             </label>
             <label style={labelStyle}>
-              ID no Kommo (opcional)
-              <input value={form.crmUserId} onChange={(e) => setForm((f) => ({ ...f, crmUserId: e.target.value }))} placeholder="Só se este cliente dispara para o Kommo" style={inputStyle} />
-              <span style={hintStyle}>ID do responsável no Kommo, para atribuir o lead direto ao vendedor no CRM.</span>
+              Responsável no Kommo (opcional)
+              {kommoConnected && kommoUsers.length > 0 && !manualKommoId ? (
+                <>
+                  <select
+                    value={form.crmUserId}
+                    onChange={(e) => setForm((f) => ({ ...f, crmUserId: e.target.value }))}
+                    style={{ ...inputStyle, appearance: "auto" }}
+                  >
+                    <option value="">— Nenhum —</option>
+                    {kommoUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}{u.email ? ` · ${u.email}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={hintStyle}>
+                    Buscado do Kommo deste cliente — o ID entra sozinho. {" "}
+                    <button type="button" onClick={() => setManualKommoId(true)} style={{ background: "none", border: "none", color: "#4f46e5", fontWeight: 600, cursor: "pointer", padding: 0, fontSize: 11.5 }}>
+                      Digitar ID manualmente
+                    </button>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <input value={form.crmUserId} onChange={(e) => setForm((f) => ({ ...f, crmUserId: e.target.value }))} placeholder="Só se este cliente dispara para o Kommo" style={inputStyle} />
+                  <span style={hintStyle}>
+                    {kommoConnected
+                      ? "Kommo conectado, mas nenhum responsável encontrado — digite o ID."
+                      : "Kommo não conectado neste cliente. Conecte em Destinos para escolher o responsável por nome."}
+                    {manualKommoId && kommoUsers.length > 0 && (
+                      <>
+                        {" "}
+                        <button type="button" onClick={() => setManualKommoId(false)} style={{ background: "none", border: "none", color: "#4f46e5", fontWeight: 600, cursor: "pointer", padding: 0, fontSize: 11.5 }}>
+                          Escolher da lista
+                        </button>
+                      </>
+                    )}
+                  </span>
+                </>
+              )}
             </label>
 
             <div style={{ borderTop: "1px solid #eee", paddingTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>

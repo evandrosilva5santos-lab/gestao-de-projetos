@@ -3,6 +3,34 @@
 import { supabaseAdmin as supabase } from "@/lib/supabase/client";
 import type { SellerAvailability } from "@/lib/leads/availability";
 import type { QualificationRule } from "@/lib/leads/qualification";
+import { fetchKommoUsers } from "@/lib/leads/integrations/kommo";
+
+/**
+ * Responsáveis (usuários) do Kommo do cliente — pra escolher o vendedor por nome
+ * em vez de digitar o ID na mão. Lê o subdomínio/token do destino Kommo já
+ * configurado (gestao_leads_destinations, type='kommo'). Sem Kommo conectado,
+ * devolve connected:false pra UI cair no campo de ID manual.
+ */
+export async function getKommoResponsibles(workspaceId: string) {
+  const { data: dest, error } = await supabase
+    .from("gestao_leads_destinations")
+    .select("config")
+    .eq("workspace_id", workspaceId)
+    .eq("type", "kommo")
+    .maybeSingle();
+
+  if (error) return { success: false as const, error: error.message };
+  const cfg = dest?.config as { subdomain?: string; token?: string } | undefined;
+  if (!cfg?.subdomain || !cfg?.token) {
+    return { success: true as const, connected: false as const, users: [] };
+  }
+
+  const res = await fetchKommoUsers(cfg.subdomain, cfg.token);
+  if (!res.success) return { success: false as const, error: res.error || "Falha ao buscar responsáveis no Kommo." };
+
+  const users = (res.users || []).map((u) => ({ id: String(u.id), name: u.name, email: u.email }));
+  return { success: true as const, connected: true as const, users };
+}
 
 /**
  * Nome de um workspace a partir do id na URL (?workspace=id) — usado pra
